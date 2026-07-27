@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Conciliador Neostar - Auditoría</title>
+    <style>
+      body { margin: 0; background: #eff2ff; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #0f172a; }
+      .page { max-width: 1100px; margin: 28px auto; padding: 0 16px; }
+      .card { background: #fff; border-radius: 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08); padding: 28px; }
+      .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 4px; }
+      .logo-img { height: 36px; width: auto; }
+      .logo-title { margin: 0; font-size: 1.55rem; font-weight: 700; }
+      .menu-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+      .menu-link { display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 14px; text-decoration: none; color: #fff; background: #4338ca; font-weight: 700; }
+      .menu-link:hover { background: #3730a3; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      th, td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; }
+      th { background: #f8fafc; font-weight: 700; }
+      code { background: #f1f5f9; border-radius: 8px; padding: 2px 6px; font-size: 0.85rem; word-break: break-word; }
+      .small-text { color: #64748b; margin-top: 6px; }
+
+      @media (max-width: 720px) {
+        .page { padding: 0 10px; margin: 14px auto; }
+        .card { padding: 16px; border-radius: 18px; }
+        .logo-title { font-size: 1.3rem; }
+
+        table, thead, tbody, th, td, tr { display: block; }
+        thead { display: none; }
+        tbody tr { border: 1px solid #e2e8f0; border-radius: 14px; margin-bottom: 12px; padding: 6px 10px; background: #fff; }
+        td { border: none; border-bottom: 1px solid #f1f5f9; padding: 8px 0 8px 32%; text-align: right; position: relative; min-height: 20px; }
+        td:last-child { border-bottom: none; }
+        td::before { content: attr(data-label); position: absolute; left: 0; top: 8px; width: 30%; text-align: left; font-weight: 700; color: #334155; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="logo">
+          <img class="logo-img" src="{{ url_for('static', filename='neostar-logo.jpg') }}" alt="Neostar">
+          <h1 class="logo-title">Auditoría</h1>
+        </div>
+        <p class="small-text">Últimas {{ entries|length }} acciones registradas (login, cargas, unificaciones, cambios de CI, administración de usuarios).</p>
+        <div class="menu-row" style="margin-top:16px;">
+          <a class="menu-link" href="/admin">Admin</a>
+          <a class="menu-link" href="/records">Resumen</a>
+          <a class="menu-link" href="/logout">Salir</a>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha (UTC)</th>
+              <th>Usuario</th>
+              <th>Acción</th>
+              <th>Detalle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+              <tr>
+                <td data-label="Fecha (UTC)">{{ entry.ts }}</td>
+                <td data-label="Usuario">{{ entry.username }}</td>
+                <td data-label="Acción">{{ entry.action }}</td>
+                <td data-label="Detalle">{% if entry.detail %}<code>{{ entry.detail }}</code>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

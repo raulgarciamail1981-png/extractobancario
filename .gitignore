@@ -1,0 +1,26 @@
+# Esta carpeta mezcla el código de la app con datos reales de la empresa
+# (extractos bancarios de muestra, la base de datos, usuarios, archivos
+# maestros). Por eso NO se ignora archivo por archivo: se ignora todo por
+# defecto y se permite explícitamente solo lo que es código de la
+# aplicación. Cualquier archivo nuevo (datos, extractos, scripts sueltos de
+# debug) queda afuera del repo automáticamente salvo que se agregue acá.
+*
+!*/
+
+!.gitignore
+!.dockerignore
+!.env.example
+!DEPLOY.md
+!requirements.txt
+!Dockerfile
+!docker-compose.yml
+!Caddyfile
+!web_app.py
+!conciliador.py
+!db.py
+!wsgi.py
+!migrate_sqlite_to_postgres.py
+
+!templates/**
+!static/**
+!tests/*.py

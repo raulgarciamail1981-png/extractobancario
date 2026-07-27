@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Conciliador Neostar - Registros</title>
+    <style>
+      body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #eff2ff; color: #0f172a; }
+      .page { max-width: 1700px; margin: 28px auto; padding: 0 24px; }
+      .card { background: #ffffff; border-radius: 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08); padding: 32px; }
+      .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+      .logo-img { height: 40px; width: auto; }
+      .logo-title { font-size: 1.6rem; font-weight: 700; margin: 0; }
+      .top-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 24px; }
+      .menu-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+      .menu-link { display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 14px; text-decoration: none; background: #4338ca; color: #fff; font-weight: 700; }
+      .menu-link:hover { background: #3730a3; }
+      .status-pill { display: inline-flex; align-items: center; gap: 8px; background: #eef2ff; color: #1d4ed8; border-radius: 999px; padding: 10px 16px; font-weight: 600; }
+      .button { border: none; border-radius: 14px; padding: 12px 18px; background: #4338ca; color: #fff; font-weight: 700; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease; }
+      .button:hover { background: #3730a3; transform: translateY(-1px); }
+      .button.secondary { background: #e0e7ff; color: #3730a3; }
+      .button.secondary:hover { background: #c7d2fe; }
+      .alert { border-radius: 16px; padding: 16px; margin-bottom: 20px; }
+      .alert.success { background: #ecfdf5; color: #166534; }
+      .alert.error { background: #fee2e2; color: #991b1b; }
+      .alert.notice { background: #fef9c3; color: #854d0e; display: none; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .filters-frame { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 20px; padding: 20px; margin-bottom: 18px; }
+      .filters-frame h2 { margin: 0 0 14px; font-size: 1rem; color: #334155; }
+      .ci-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 18px; }
+      .ci-summary-card { border: 1px solid #fed7aa; background: #fff7ed; color: #9a3412; border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+      .ci-summary-card.ci-summary-total { border-color: #c7d2fe; background: #eef2ff; color: #3730a3; }
+      .ci-summary-name { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 2px; }
+      .ci-summary-line { color: inherit; text-decoration: none; font-size: 0.85rem; }
+      .ci-summary-line:hover { text-decoration: underline; }
+      .ci-summary-line strong { font-size: 1.15rem; }
+      .grid-container { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+      th, td { padding: 9px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+      th { background: #f8fafc; color: #334155; font-weight: 700; position: sticky; top: 0; z-index: 2; white-space: nowrap; }
+      td.descripcion-cell { max-width: 260px; white-space: normal; word-break: break-word; }
+      tbody tr:nth-child(even) { background: #f1f5f9; }
+      tbody tr:hover { background: #e0e7ff; }
+      input.ci-field { width: 100%; border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px 12px; box-sizing: border-box; }
+      select.ci-field { width: 100%; border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px 12px; box-sizing: border-box; background: #fff; }
+      input.ci-cell-field { width: 84px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 6px 8px; }
+      input.ci-cell-field.ci-alert { background: #fecaca; border-color: #ef4444; }
+      .download-links { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .subtitle { color: #64748b; margin-top: 6px; }
+      .small-text { font-size: 0.95rem; color: #64748b; margin-top: 8px; }
+      .save-ci-bar { position: fixed; bottom: 24px; right: 24px; z-index: 50; background: #ffffff; border-radius: 18px; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.22); padding: 14px 18px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      .save-ci-bar .button { box-shadow: 0 6px 16px rgba(67, 56, 202, 0.35); }
+      .save-ci-bar .small-text { margin-top: 0; }
+      body.has-save-ci-bar .card { padding-bottom: 90px; }
+
+      /* Mobile: recuadros a 1 columna, tabla como tarjetas apiladas, barra de
+         Guardar CI fija de punta a punta abajo en vez de flotar en la esquina. */
+      @media (max-width: 720px) {
+        .page { padding: 0 10px; margin: 14px auto; }
+        .card { padding: 16px; border-radius: 18px; }
+        .logo-title { font-size: 1.3rem; }
+        .logo-img { height: 32px; }
+        .top-row { gap: 12px; }
+        .filters-frame { padding: 14px; }
+        .ci-summary-grid { grid-template-columns: 1fr; }
+        body.has-save-ci-bar .card { padding-bottom: 76px; }
+        .save-ci-bar { left: 0; right: 0; bottom: 0; border-radius: 18px 18px 0 0; justify-content: center; text-align: center; box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.18); }
+
+        .grid-container { overflow-x: visible; }
+        table, thead, tbody, th, td, tr { display: block; }
+        thead { display: none; }
+        tbody tr { border: 1px solid #e2e8f0; border-radius: 14px; margin-bottom: 12px; padding: 6px 10px; background: #fff; }
+        tbody tr:nth-child(even) { background: #f8fafc; }
+        td { border: none; border-bottom: 1px solid #f1f5f9; padding: 8px 0 8px 42%; text-align: right; position: relative; min-height: 20px; }
+        td:last-child { border-bottom: none; }
+        td::before { content: attr(data-label); position: absolute; left: 0; top: 8px; width: 38%; text-align: left; font-weight: 700; color: #334155; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
+        td.descripcion-cell { max-width: none; text-align: right; white-space: normal; }
+        input.ci-cell-field { width: 100%; max-width: 160px; }
+      }
+    </style>
+  </head>
+  <body{% if role in ['admin', 'cajera'] %} class="has-save-ci-bar"{% endif %}>
+    <div class="page">
+      <div class="card">
+        <div class="logo">
+          <img class="logo-img" src="{{ url_for('static', filename='neostar-logo.jpg') }}" alt="Neostar">
+          <div>
+            <p class="logo-title">Registros unificados</p>
+            <p class="subtitle">Visualizá los movimientos y cargá CI cuando corresponda.</p>
+          </div>
+        </div>
+        <div class="top-row" style="gap: 20px;">
+          <div class="status-pill">{{ display_name }} · {{ role }}</div>
+          <div class="download-links">
+            <a class="button" href="/download/excel?{{ filters_query }}">Descargar Excel</a>
+            <a class="button" href="/download/pdf?{{ filters_query }}">Ver PDF</a>
+            {% if role in ['admin', 'uploader', 'finanzas'] %}<a class="button" href="/upload">Volver</a>{% endif %}
+          </div>
+        </div>
+
+        <div id="newDataBanner" class="alert notice">
+          <span id="newDataMessage"></span>
+          <button type="button" class="button" onclick="location.reload()">Actualizar</button>
+        </div>
+
+        <form method="get" action="/records" class="filters-frame" id="filtersForm">
+          <h2>Filtros</h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end;">
+            <label>
+              Empresa
+              <select class="ci-field" name="empresa">
+                <option value="">Todas</option>
+                {% for option in empresa_options %}
+                  <option value="{{ option }}" {% if filters.empresa == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Banco
+              <select class="ci-field" name="banco">
+                <option value="">Todos</option>
+                {% for option in banco_options %}
+                  <option value="{{ option }}" {% if filters.banco == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Fecha exacta
+              <input class="ci-field" type="date" name="fecha" value="{{ filters.fecha or '' }}">
+            </label>
+            <label>
+              Desde
+              <input class="ci-field" type="date" name="fecha_desde" id="fechaDesdeInput" value="{{ filters.fecha_desde or '' }}">
+            </label>
+            <label>
+              Hasta
+              <input class="ci-field" type="date" name="fecha_hasta" id="fechaHastaInput" value="{{ filters.fecha_hasta or '' }}">
+            </label>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; margin-top: 12px;">
+            <label>
+              CI
+              <select class="ci-field" name="ci_filter">
+                <option value="all" {% if filters.ci_filter == 'all' %}selected{% endif %}>Todos</option>
+                <option value="con_ci" {% if filters.ci_filter == 'con_ci' %}selected{% endif %}>Con CI</option>
+                <option value="vacios" {% if filters.ci_filter == 'vacios' %}selected{% endif %}>Vacíos</option>
+              </select>
+            </label>
+            <label>
+              Movimiento
+              <select class="ci-field" name="monto_filter">
+                <option value="all" {% if filters.monto_filter == 'all' %}selected{% endif %}>Todos</option>
+                <option value="positivos" {% if filters.monto_filter == 'positivos' %}selected{% endif %}>Acreditaciones</option>
+                <option value="negativos" {% if filters.monto_filter == 'negativos' %}selected{% endif %}>Débitos</option>
+              </select>
+            </label>
+            <label>
+              Moneda
+              <select class="ci-field" name="moneda">
+                <option value="">Todas</option>
+                <option value="$" {% if filters.moneda == '$' %}selected{% endif %}>$</option>
+                <option value="USD" {% if filters.moneda == 'USD' %}selected{% endif %}>USD</option>
+              </select>
+            </label>
+            <label>
+              Buscar (monto o descripción)
+              <input class="ci-field" type="text" name="search" value="{{ filters.search or '' }}" placeholder="ej. 1500 o transferencia">
+            </label>
+          </div>
+          <div style="display:flex; gap:12px; flex-wrap: wrap; justify-content:flex-end; margin-top: 14px;">
+            <button type="button" id="last30Button" class="button secondary">Ver últimos 30 días</button>
+            <a class="button" href="/records">Borrar filtros</a>
+          </div>
+        </form>
+
+        <div class="ci-summary-grid">
+          <div class="ci-summary-card ci-summary-total">
+            <div class="ci-summary-name">{{ total_summary.name }}</div>
+            <a class="ci-summary-line" href="{{ total_summary.sin_ci_href }}">
+              <strong>{{ total_summary.sin_ci }}</strong> acreditaciones sin CI
+            </a>
+            <a class="ci-summary-line" href="{{ total_summary.vencido_href }}">
+              <strong>{{ total_summary.vencido }}</strong> de esas con más de {{ ci_alert_days }} días sin CI
+            </a>
+          </div>
+          {% for empresa in company_summaries %}
+          <div class="ci-summary-card">
+            <div class="ci-summary-name">{{ empresa.name }}</div>
+            <a class="ci-summary-line" href="{{ empresa.sin_ci_href }}">
+              <strong>{{ empresa.sin_ci }}</strong> acreditaciones sin CI
+            </a>
+            <a class="ci-summary-line" href="{{ empresa.vencido_href }}">
+              <strong>{{ empresa.vencido }}</strong> de esas con más de {{ ci_alert_days }} días sin CI
+            </a>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="menu-row" style="margin-bottom:18px;">
+          {% if role in ['admin', 'uploader', 'finanzas'] %}<a class="menu-link" href="/upload">Carga</a>{% endif %}
+          <a class="menu-link" href="/records">Resumen</a>
+          {% if role == 'admin' %}<a class="menu-link" href="/admin">Admin</a>{% endif %}
+          <a class="menu-link" href="/change-password">Cambiar contraseña</a>
+          <a class="menu-link" href="/logout">Salir</a>
+        </div>
+
+        {% if message %}
+          <div class="alert success">{{ message }}</div>
+        {% endif %}
+        {% if error %}
+          <div class="alert error">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="/records">
+          <div class="grid-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Empresa</th>
+                  <th>CUIT</th>
+                  <th>Cuenta</th>
+                  <th>Moneda</th>
+                  <th>Banco</th>
+                  <th>Descripción</th>
+                  <th>Monto</th>
+                  {% if show_saldo %}<th>Saldo</th>{% endif %}
+                  {% if show_ci %}<th>CI</th>{% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in rows %}
+                  <tr>
+                    <td data-label="Fecha">{{ row.Fecha_display }}</td>
+                    <td data-label="Empresa">{{ row.Empresa }}</td>
+                    <td data-label="CUIT">{{ row.CUIT }}</td>
+                    <td data-label="Cuenta">{{ row.Cuenta }}</td>
+                    <td data-label="Moneda">{{ row.Moneda }}</td>
+                    <td data-label="Banco">{{ row.Banco }}</td>
+                    <td class="descripcion-cell" data-label="Descripción">{{ row.Descripcion }}</td>
+                    <td data-label="Monto">{{ row.Monto }}</td>
+                    {% if show_saldo %}<td data-label="Saldo">{{ row.Saldo }}</td>{% endif %}
+                    {% if show_ci %}
+                      <td data-label="CI">
+                        {% if role in ['admin', 'cajera'] %}
+                          <input class="ci-cell-field{% if row.ci_vencido %} ci-alert{% endif %}" type="text" name="ci_{{ row.RecordHash }}" value="{{ row.CI }}">
+                          <input type="hidden" name="record_hash" value="{{ row.RecordHash }}">
+                        {% else %}
+                          {{ row.CI }}
+                        {% endif %}
+                      </td>
+                    {% endif %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if role in ['admin', 'cajera'] %}
+            <div class="save-ci-bar">
+              <button type="submit" class="button">Guardar CI</button>
+              <span class="small-text">Solo cajeras y administradores pueden actualizar CI en la grilla.</span>
+            </div>
+          {% endif %}
+        </form>
+      </div>
+    </div>
+    <script>
+      const lastKnownUnifyTs = {{ latest_unify_ts | tojson }};
+
+      function checkForNewData() {
+        fetch('/api/latest-unify')
+          .then(response => response.json())
+          .then(data => {
+            if (!data.ts || data.ts === lastKnownUnifyTs) {
+              return;
+            }
+            const user = data.username || 'otro usuario';
+            const detail = data.detail || {};
+            const count = detail.nuevas != null ? detail.nuevas : null;
+            const banner = document.getElementById('newDataBanner');
+            const messageEl = document.getElementById('newDataMessage');
+            messageEl.textContent = 'Se agregaron nuevos registros'
+              + (count !== null ? ` (${count} nuevos)` : '')
+              + ` por ${user}. Actualizá la página para verlos.`;
+            banner.style.display = 'flex';
+          })
+          .catch(() => {});
+      }
+
+      setInterval(checkForNewData, 20000);
+
+      // Los filtros se aplican solos, sin botón: cualquier cambio reenvía el
+      // formulario. Desde/Hasta son la excepción: esperan a que ambas fechas
+      // estén completas antes de aplicar.
+      const filtersForm = document.getElementById('filtersForm');
+      filtersForm.addEventListener('change', function (event) {
+        const field = event.target;
+        if (field.name === 'fecha_desde' || field.name === 'fecha_hasta') {
+          const desde = document.getElementById('fechaDesdeInput').value;
+          const hasta = document.getElementById('fechaHastaInput').value;
+          if (desde && hasta) {
+            filtersForm.submit();
+          }
+          return;
+        }
+        filtersForm.submit();
+      });
+
+      document.getElementById('last30Button').addEventListener('click', function () {
+        const toIsoDate = (date) => date.toISOString().slice(0, 10);
+        const hasta = new Date();
+        const desde = new Date();
+        desde.setDate(desde.getDate() - 30);
+        document.getElementById('fechaHastaInput').value = toIsoDate(hasta);
+        document.getElementById('fechaDesdeInput').value = toIsoDate(desde);
+        filtersForm.submit();
+      });
+    </script>
+  </body>
+</html>

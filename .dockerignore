@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+tests/
+conciliador.db
+conciliador.db-wal
+conciliador.db-shm
+uploads/
+users.json
+Empresas.xlsx
+DATOS BANCARIOS TODAS LAS EMPRESAS.xlsx
+extractos_unificados.xlsx
+data/
+.env

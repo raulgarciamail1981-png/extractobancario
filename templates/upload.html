@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Conciliador Neostar</title>
+    <style>
+      body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #eff2ff; color: #0f172a; }
+      .page { max-width: 860px; margin: 32px auto; padding: 0 16px; }
+      .card { background: #ffffff; border-radius: 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08); padding: 32px; }
+      .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+      .logo-img { height: 44px; width: auto; }
+      .logo-title { font-size: 1.6rem; font-weight: 700; margin: 0; }
+      .logo-subtitle { margin: 4px 0 0; color: #475569; font-size: 0.95rem; }
+      h1 { font-size: 2rem; margin: 0 0 16px; }
+      .top-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 24px; }
+      .menu-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 22px; }
+      .menu-link { display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 14px; text-decoration: none; background: #4338ca; color: #fff; font-weight: 700; transition: background 0.2s ease; }
+      .menu-link:hover { background: #3730a3; }
+      .status-pill { display: inline-flex; align-items: center; gap: 8px; background: #eef2ff; color: #1d4ed8; border-radius: 999px; padding: 10px 16px; font-weight: 600; }
+      .button { border: none; border-radius: 14px; padding: 14px 20px; background: #4338ca; color: #fff; font-weight: 700; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease; }
+      .button:hover { background: #3730a3; transform: translateY(-1px); }
+      .message { border-radius: 16px; padding: 16px; margin-bottom: 20px; }
+      .message.success { background: #ecfdf5; color: #166534; }
+      .message.error { background: #fee2e2; color: #991b1b; }
+      .drag-area { border: 2px dashed #6366f1; border-radius: 20px; padding: 38px 26px; background: #eef2ff; text-align: center; transition: border-color 0.2s ease, background 0.2s ease; cursor: pointer; }
+      .drag-area.dragover { border-color: #4338ca; background: #e0e7ff; }
+      .drag-area p { margin: 0; font-size: 1rem; }
+      .drag-area strong { display: block; margin-top: 12px; font-size: 1.05rem; }
+      .file-input { display: none; }
+      .section { margin-top: 28px; }
+      .section h2 { font-size: 1.25rem; margin-bottom: 14px; }
+      .field { display: grid; gap: 12px; }
+      .field input[type=text] { width: 100%; border: 1px solid #cbd5e1; border-radius: 14px; padding: 14px 16px; font-size: 1rem; }
+      .help-text { color: #64748b; font-size: 0.95rem; margin-top: 10px; }
+
+      @media (max-width: 720px) {
+        .page { padding: 0 10px; margin: 14px auto; }
+        .card { padding: 16px; border-radius: 18px; }
+        h1 { font-size: 1.5rem; }
+        .drag-area { padding: 26px 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="logo">
+          <img class="logo-img" src="{{ url_for('static', filename='neostar-logo.jpg') }}" alt="Neostar">
+          <div>
+            <p class="logo-subtitle">Importá extractos de varios bancos con un solo clic</p>
+          </div>
+        </div>
+        <div class="top-row">
+          <div>
+            <h1>Subir extractos bancarios</h1>
+            <p class="help-text">Arrastrá archivos o seleccionalos desde tu equipo. Se admiten múltiples archivos a la vez.</p>
+          </div>
+          <div class="status-pill">{{ display_name }} · {{ role }}</div>
+        </div>
+        <div class="menu-row">
+          <a class="menu-link" href="/upload">Carga</a>
+          <a class="menu-link" href="/records">Resumen</a>
+          {% if role == 'admin' %}<a class="menu-link" href="/admin">Admin</a>{% endif %}
+          <a class="menu-link" href="/change-password">Cambiar contraseña</a>
+          <a class="menu-link" href="/logout">Salir</a>
+        </div>
+        {% if message %}
+          <div class="message success">{{ message }}</div>
+        {% endif %}
+        {% if error %}
+          <div class="message error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/upload" enctype="multipart/form-data">
+          <div id="dropArea" class="drag-area">
+            <p>Soltá los archivos aquí</p>
+            <strong>o hacé clic para seleccionar más de uno</strong>
+          </div>
+          <input id="statement-input" class="file-input" type="file" name="statement" accept=".csv,.xls,.xlsx" multiple>
+          <p id="fileLabel" class="help-text">No hay archivos seleccionados.</p>
+          <button type="submit" class="button">Subir archivos</button>
+        </form>
+
+        <div class="section">
+          <h2>Unificar extractos</h2>
+          <form method="post" action="/unify">
+            <button type="submit" class="button">Unificar todos los extractos</button>
+            <p class="help-text">Los archivos subidos se guardan en la carpeta de uploads. Al unificar, los movimientos se incorporan a la base y quedan disponibles en el Resumen. El CI ya cargado se conserva automáticamente.</p>
+          </form>
+        </div>
+        <p style="margin-top:24px;"><a href="/logout" style="color:#4338ca; text-decoration:none; font-weight:600;">Cerrar sesión</a></p>
+      </div>
+    </div>
+    <script>
+      const dropArea = document.getElementById('dropArea');
+      const fileInput = document.getElementById('statement-input');
+      const fileLabel = document.getElementById('fileLabel');
+
+      function updateLabel(files) {
+        if (!files || files.length === 0) {
+          fileLabel.textContent = 'No hay archivos seleccionados.';
+          return;
+        }
+        const list = Array.from(files).map(file => file.name);
+        fileLabel.textContent = list.join(', ');
+      }
+
+      dropArea.addEventListener('click', () => fileInput.click());
+      dropArea.addEventListener('dragover', event => {
+        event.preventDefault();
+        dropArea.classList.add('dragover');
+      });
+      dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+      dropArea.addEventListener('drop', event => {
+        event.preventDefault();
+        dropArea.classList.remove('dragover');
+        const files = event.dataTransfer.files;
+        if (files.length) {
+          fileInput.files = files;
+          updateLabel(files);
+        }
+      });
+      fileInput.addEventListener('change', () => updateLabel(fileInput.files));
+    </script>
+  </body>
+</html>

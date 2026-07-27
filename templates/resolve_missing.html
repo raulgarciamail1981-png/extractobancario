@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Conciliador Neostar - Resolver faltantes</title>
+    <style>
+      body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #eff2ff; color: #0f172a; }
+      .page { max-width: 1100px; margin: 28px auto; padding: 0 16px; }
+      .card { background: #ffffff; border-radius: 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08); padding: 32px; }
+      .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+      .logo-img { height: 36px; width: auto; }
+      .logo-title { font-size: 1.6rem; font-weight: 700; margin: 0; }
+      .button { border: none; border-radius: 14px; padding: 12px 18px; background: #4338ca; color: #fff; font-weight: 700; cursor: pointer; }
+      .button:hover { background: #3730a3; }
+      .message { border-radius: 16px; padding: 16px; margin-bottom: 20px; }
+      .message.error { background: #fee2e2; color: #991b1b; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+      th, td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+      th { background: #f8fafc; font-weight: 700; }
+      select { width: 100%; border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px 12px; }
+      .small-text { color: #64748b; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="logo">
+          <img class="logo-img" src="{{ url_for('static', filename='neostar-logo.jpg') }}" alt="Neostar">
+          <div>
+            <p class="logo-title">Resolver filas sin Empresa ni CUIT</p>
+            <p class="small-text">Seleccione el CUIT y empresa correspondiente para cada registro antes de unificar.</p>
+          </div>
+        </div>
+        {% if error %}
+          <div class="message error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/unify">
+          <input type="hidden" name="resolve_missing" value="1">
+          <input type="hidden" name="missing_count" value="{{ rows|length }}">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Archivo</th>
+                <th>Fecha</th>
+                <th>Cuenta</th>
+                <th>Descripción</th>
+                <th>CUIT actual</th>
+                <th>Empresa actual</th>
+                <th>Banco</th>
+                <th>Asignar CUIT / Empresa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr>
+                  <td>{{ loop.index }}</td>
+                  <td>{{ row.SourceFile }}</td>
+                  <td>{{ row.Fecha }}</td>
+                  <td>{{ row.Cuenta }}</td>
+                  <td>{{ row.Descripcion }}</td>
+                  <td>{{ row.CUIT or '-' }}</td>
+                  <td>{{ row.Empresa or '-' }}</td>
+                  <td>
+                    <select name="bank_{{ loop.index0 }}">
+                      <option value="">Seleccionar banco</option>
+                      {% for option in bank_options %}
+                        <option value="{{ option }}" {% if row.Banco == option %}selected{% endif %}>{{ option }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td>
+                    <input type="hidden" name="record_hash_{{ loop.index0 }}" value="{{ row.RecordHash }}">
+                    <select name="mapping_{{ loop.index0 }}">
+                      <option value="">Seleccionar empresa / CUIT</option>
+                      {% for option in company_options %}
+                        <option value="{{ option.cuit }}" {% if row.CUIT == option.cuit or row.Empresa == option.empresa %}selected{% endif %}>{{ option.empresa }} — {{ option.cuit }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <button type="submit" class="button">Guardar asignaciones y continuar</button>
+          <p class="small-text">Si no asignás todas las filas, se te pedirá completarlas nuevamente.</p>
+        </form>
+      </div>
+    </div>
+  </body>
+</html>

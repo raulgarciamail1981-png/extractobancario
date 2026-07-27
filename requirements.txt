@@ -1,0 +1,12 @@
+flask
+pandas
+openpyxl
+xlrd
+werkzeug
+waitress
+pytest
+Pillow
+reportlab
+pypdf
+SQLAlchemy
+psycopg2-binary
