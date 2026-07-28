@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import io
 import re
 from datetime import datetime
 from pathlib import Path
@@ -14,13 +15,24 @@ MASTER_FILE = ROOT / 'extractos_unificados.xlsx'
 SUPPORTED_EXTENSIONS = {'.csv', '.xls', '.xlsx'}
 LOGO_FILE = Path(__file__).resolve().parent / 'static' / 'neostar-logo.jpg'
 
+# Nombre con el que se muestra cada banco en toda la app (grilla, filtros,
+# exportaciones). La clave es el texto que se busca —ya normalizado a
+# minúsculas y sin acentos— dentro del nombre de archivo o de la celda del
+# maestro de datos bancarios.
+#
+# OJO al cambiar un valor de acá: el nombre del banco forma parte del
+# RecordHash que identifica cada movimiento, así que renombrarlo hace que los
+# movimientos ya guardados dejen de reconocerse y se dupliquen en la siguiente
+# importación. Hay que acompañarlo con una migración de la base
+# (migrate_bank_names.py). Además, las claves de BANK_DESCRIPTION_COLUMNS son
+# estos mismos nombres en mayúsculas y tienen que seguir coincidiendo.
 BANK_PATTERNS = {
     'icbc': 'ICBC',
     'galicia': 'Galicia',
     'macro': 'Macro',
-    'municipal': 'Municipal',
+    'municipal': 'Banco Municipal',
     'santa fe': 'Santa Fe',
-    'santander': 'Santander',
+    'santander': 'Santander RIO',
 }
 
 COMPANY_PATTERNS = {
@@ -68,12 +80,15 @@ I_COLUMNS = ['i']
 # arma sobre el banco ya resuelto (cruce de cuenta o filename), no sobre el
 # nombre de archivo, para que funcione igual sin importar cómo se detectó el
 # banco.
+# Las claves son los valores de BANK_PATTERNS en mayúsculas (así los busca
+# build_record): si se renombra un banco allá, hay que renombrarlo acá también
+# o la descripción de ese banco se arma con la columna genérica.
 BANK_DESCRIPTION_COLUMNS = {
-    'MACRO': [5, 3, 4],           # Concepto | Nro. de Referencia | Causal
-    'SANTANDER': [1, 2, 3, 4, 5],  # Suc. Origen | Desc. Sucursal | Cod. Operativo | Referencia | Concepto
-    'MUNICIPAL': [5, 4],          # Descripción | N° de Comprobante
-    'SANTA FE': [1, 2],           # Concepto | Nro. comprobante
-    'ICBC': [1, 2, 3, 9, 8],      # Cod de Concepto | Concepto | Debito en $ | Canal | Sucursal Origen
+    'MACRO': [5, 3, 4],                 # Concepto | Nro. de Referencia | Causal
+    'SANTANDER RIO': [1, 2, 3, 4, 5],   # Suc. Origen | Desc. Sucursal | Cod. Operativo | Referencia | Concepto
+    'BANCO MUNICIPAL': [5, 4],          # Descripción | N° de Comprobante
+    'SANTA FE': [1, 2],                 # Concepto | Nro. comprobante
+    'ICBC': [1, 2, 3, 9, 8],            # Cod de Concepto | Concepto | Debito en $ | Canal | Sucursal Origen
 }
 
 
@@ -1030,11 +1045,7 @@ def apply_filters(df: pd.DataFrame, args: argparse.Namespace) -> pd.DataFrame:
     return df
 
 
-def create_master_file(df: pd.DataFrame, output_path: Path, fields: List[str] | None = None,
-                        header_note: str | None = None) -> Path:
-    if df.empty:
-        print('No hay registros para guardar.')
-        return output_path
+def _prepare_master_dataframe(df: pd.DataFrame, fields: List[str] | None = None) -> pd.DataFrame:
     df = df.copy()
     df['Fecha'] = parse_fecha_column(df['Fecha'])
     if 'CI' in df.columns:
@@ -1048,21 +1059,50 @@ def create_master_file(df: pd.DataFrame, output_path: Path, fields: List[str] | 
         df = df[[f for f in fields if f in df.columns]]
     df = df.sort_values('Fecha', ascending=False, na_position='last')
     df['Fecha'] = df['Fecha'].dt.strftime('%d/%m/%Y').fillna('')
+    return df
+
+
+def _write_master_sheet(df: pd.DataFrame, target, header_note: str | None = None) -> None:
+    # 'target' puede ser una ruta o un buffer en memoria: la descarga web no
+    # escribe a disco (ver build_master_bytes) y el CLI sí.
+    with pd.ExcelWriter(target, engine='openpyxl', datetime_format='DD/MM/YYYY', date_format='DD/MM/YYYY') as writer:
+        base_rows = 4 if LOGO_FILE.exists() else 0
+        startrow = base_rows + (1 if header_note else 0)
+        df.to_excel(writer, index=False, engine='openpyxl', startrow=startrow)
+        worksheet = writer.sheets[writer.book.sheetnames[0]]
+        if LOGO_FILE.exists():
+            from openpyxl.drawing.image import Image as XLImage
+            image = XLImage(str(LOGO_FILE))
+            image.width = 200
+            image.height = 56
+            worksheet.add_image(image, 'A1')
+        if header_note:
+            worksheet.cell(row=base_rows + 1, column=1, value=header_note)
+
+
+def build_master_bytes(df: pd.DataFrame, fields: List[str] | None = None,
+                        header_note: str | None = None) -> bytes:
+    """Genera el .xlsx unificado en memoria, sin tocar el disco.
+
+    La descarga web usa esto en vez de create_master_file: un archivo temporal
+    con nombre fijo y compartido hace que dos descargas simultáneas se pisen, y
+    como el contenido depende del rol (la cajera no ve Saldo) y de los filtros
+    de quien descarga, el pisón se lleva datos de un usuario al otro.
+    """
+    buffer = io.BytesIO()
+    _write_master_sheet(_prepare_master_dataframe(df, fields), buffer, header_note)
+    return buffer.getvalue()
+
+
+def create_master_file(df: pd.DataFrame, output_path: Path, fields: List[str] | None = None,
+                        header_note: str | None = None) -> Path:
+    if df.empty:
+        print('No hay registros para guardar.')
+        return output_path
+    prepared = _prepare_master_dataframe(df, fields)
 
     def save_to(path: Path) -> None:
-        with pd.ExcelWriter(path, engine='openpyxl', datetime_format='DD/MM/YYYY', date_format='DD/MM/YYYY') as writer:
-            base_rows = 4 if LOGO_FILE.exists() else 0
-            startrow = base_rows + (1 if header_note else 0)
-            df.to_excel(writer, index=False, engine='openpyxl', startrow=startrow)
-            worksheet = writer.sheets[writer.book.sheetnames[0]]
-            if LOGO_FILE.exists():
-                from openpyxl.drawing.image import Image as XLImage
-                image = XLImage(str(LOGO_FILE))
-                image.width = 200
-                image.height = 56
-                worksheet.add_image(image, 'A1')
-            if header_note:
-                worksheet.cell(row=base_rows + 1, column=1, value=header_note)
+        _write_master_sheet(prepared, path, header_note)
 
     try:
         save_to(output_path)

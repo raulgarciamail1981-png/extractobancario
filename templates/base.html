@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Conciliador Neostar{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  </head>
+  <body{% block body_class %}{% endblock %}>
+    {# La grilla de movimientos usa el layout ancho; el resto, el de 1180px. #}
+    {% set wide = request.endpoint == 'records' %}
+    <div class="layout">
+      {% if session.get('username') %}
+        {% set role = session.get('role') %}
+        <header class="header">
+          <div class="header__bar{% if wide %} header__bar--wide{% endif %}">
+            <a class="header__brand" href="{{ url_for('records') }}">
+              <img class="header__logo" src="{{ url_for('static', filename='neostar-wordmark.png') }}" alt="Neostar">
+              <span class="header__app">Conciliador</span>
+            </a>
+            <div class="header__right">
+              <nav class="header__nav">
+                {% if has_role('admin', 'uploader', 'finanzas') %}
+                  <a class="navlink{% if request.endpoint == 'upload' %} navlink--active{% endif %}" href="/upload">Carga</a>
+                {% endif %}
+                <a class="navlink{% if request.endpoint == 'records' %} navlink--active{% endif %}" href="/records">Resumen</a>
+                {% if has_role('admin') %}
+                  <a class="navlink{% if request.endpoint == 'admin' %} navlink--active{% endif %}" href="/admin">Admin</a>
+                  <a class="navlink{% if request.endpoint == 'admin_audit' %} navlink--active{% endif %}" href="/admin/audit">Auditoría</a>
+                {% endif %}
+                <a class="navlink{% if request.endpoint == 'change_password' %} navlink--active{% endif %}" href="/change-password">Contraseña</a>
+                <a class="navlink navlink--exit" href="/logout">Salir</a>
+              </nav>
+              <span class="userchip">
+                {{ session.get('nombre') or session.get('username') }}
+                <span class="userchip__role">{{ session.get('roles') | join(' · ') if session.get('roles') else role }}</span>
+              </span>
+            </div>
+          </div>
+        </header>
+      {% endif %}
+
+      <main class="main{% if wide %} main--wide{% endif %}">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

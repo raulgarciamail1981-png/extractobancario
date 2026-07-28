@@ -7,9 +7,17 @@
 *
 !*/
 
+# El "!*/" de arriba hace que git descienda a cualquier carpeta; estas se
+# vuelven a ignorar enteras para que no aparezcan como "untracked".
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+
 !.gitignore
 !.dockerignore
 !.env.example
+!users.example.json
 !DEPLOY.md
 !requirements.txt
 !Dockerfile
@@ -20,6 +28,7 @@
 !db.py
 !wsgi.py
 !migrate_sqlite_to_postgres.py
+!migrate_bank_names.py
 
 !templates/**
 !static/**

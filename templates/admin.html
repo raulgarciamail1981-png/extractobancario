@@ -1,188 +1,166 @@
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Conciliador Neostar - Admin</title>
-    <style>
-      body { margin: 0; background: #eff2ff; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #0f172a; }
-      .page { max-width: 1000px; margin: 28px auto; padding: 0 16px; }
-      .card { background: #fff; border-radius: 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08); padding: 28px; }
-      .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
-      .logo-img { height: 36px; width: auto; }
-      .logo-title { margin: 0; font-size: 1.55rem; font-weight: 700; }
-      .menu-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-      .menu-link { display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 14px; text-decoration: none; color: #fff; background: #4338ca; font-weight: 700; transition: background 0.2s ease; }
-      .menu-link:hover { background: #3730a3; }
-      table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-      th, td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; text-align: left; }
-      th { background: #f8fafc; font-weight: 700; }
-      .badge { display: inline-flex; border-radius: 999px; padding: 6px 12px; background: #eef2ff; color: #1e3a8a; font-weight: 600; }
-      .button { border: none; border-radius: 14px; padding: 12px 18px; background: #4338ca; color: #fff; text-decoration: none; font-weight: 700; cursor: pointer; }
-      .button.small { padding: 8px 14px; font-size: 0.85rem; border-radius: 10px; background: #e0e7ff; color: #3730a3; }
-      .button.small:hover { background: #c7d2fe; }
-      .form-frame { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 20px; padding: 20px; margin-bottom: 24px; }
-      .form-frame h2 { margin: 0 0 14px; font-size: 1.05rem; color: #334155; }
-      .form-frame form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
-      .form-frame label { display: flex; flex-direction: column; gap: 8px; font-weight: 600; color: #334155; }
-      .form-frame input, .form-frame select { border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px; }
-      .search-row { display: flex; gap: 12px; align-items: center; margin-top: 22px; flex-wrap: wrap; }
-      .search-row input { flex: 1; min-width: 220px; border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px 14px; }
+{% extends 'base.html' %}
+{% block title %}Conciliador Neostar · Admin{% endblock %}
 
-      @media (max-width: 720px) {
-        .page { padding: 0 10px; margin: 14px auto; }
-        .card { padding: 16px; border-radius: 18px; }
-        .logo-title { font-size: 1.3rem; }
-        .form-frame { padding: 14px; }
+{% block content %}
+  <section class="hero">
+    <span class="hero__eyebrow">Administración</span>
+    <h1 class="hero__title">Usuarios y <span>roles</span></h1>
+    <p class="hero__subtitle">Altas, bajas y cambios de perfil de las personas que usan el conciliador.</p>
+  </section>
 
-        table, thead, tbody, th, td, tr { display: block; }
-        thead { display: none; }
-        tbody tr { border: 1px solid #e2e8f0; border-radius: 14px; margin-bottom: 12px; padding: 6px 10px; background: #fff; }
-        td { border: none; border-bottom: 1px solid #f1f5f9; padding: 8px 0 8px 42%; text-align: right; position: relative; min-height: 20px; }
-        td:last-child { border-bottom: none; text-align: right; padding-left: 0; }
-        td::before { content: attr(data-label); position: absolute; left: 0; top: 8px; width: 38%; text-align: left; font-weight: 700; color: #334155; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
-        td:last-child::before { content: none; }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="page">
-      <div class="card">
-        <div class="logo">
-          <img class="logo-img" src="{{ url_for('static', filename='neostar-logo.jpg') }}" alt="Neostar">
-          <div>
-            <h1 class="logo-title">Admin</h1>
-            <p style="margin: 4px 0 0; color: #64748b;">Gestión de usuarios y roles del sistema.</p>
-          </div>
-        </div>
-        <div class="menu-row">
-          <a class="menu-link" href="/upload">Carga</a>
-          <a class="menu-link" href="/records">Resumen</a>
-          <a class="menu-link" href="/admin/audit">Auditoría</a>
-          <a class="menu-link" href="/change-password">Cambiar contraseña</a>
-          <a class="menu-link" href="/logout">Salir</a>
-        </div>
-        {% if message %}
-          <div style="background:#ecfdf5;color:#166534;border-radius:16px;padding:14px;margin-bottom:16px;">{{ message }}</div>
-        {% endif %}
-        {% if error %}
-          <div style="background:#fee2e2;color:#991b1b;border-radius:16px;padding:14px;margin-bottom:16px;">{{ error }}</div>
-        {% endif %}
+  {% if message %}
+    <div class="alert alert--ok">{{ message }}</div>
+  {% endif %}
+  {% if error %}
+    <div class="alert alert--error">{{ error }}</div>
+  {% endif %}
 
-        <div class="form-frame">
-          <h2 id="formTitle">Agregar / editar usuario</h2>
-          <form method="post" id="userForm">
-            <label>
-              Usuario
-              <input type="text" name="username" id="fieldUsername" required>
-            </label>
-            <label>
-              Nombre y Apellido
-              <input type="text" name="nombre" id="fieldNombre">
-            </label>
-            <label>
-              Contraseña
-              <input type="password" name="password" id="fieldPassword" minlength="8" pattern="[A-Za-z0-9]+">
-            </label>
-            <label>
-              Rol
-              <select name="role" id="fieldRole" required>
-                {% for option in user_options %}
-                  <option value="{{ option }}">{{ option }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <label>
-              Acción
-              <select name="action" id="fieldAction" required>
-                <option value="create">Crear</option>
-                <option value="update">Actualizar</option>
-                <option value="delete">Eliminar</option>
-              </select>
-            </label>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;">
-              <button type="submit" class="button">Guardar</button>
-              <button type="button" class="button small" id="clearFormButton">Limpiar</button>
-            </div>
-          </form>
-          <p style="color:#475569;font-size:0.9rem;margin:10px 0 0;">
-            Para crear, completá usuario, contraseña y rol. Para actualizar (incluyendo cambiar la contraseña), usá el botón "Editar" de la lista. Para eliminar, ingresá el usuario y elegí "Eliminar".
-            La contraseña debe ser alfanumérica y tener al menos 8 caracteres.
-          </p>
+  <div class="card">
+    <div class="card__title" id="formTitle">Agregar / editar usuario</div>
+    <p class="card__hint">
+      Para crear, completá usuario, contraseña y rol. Para actualizar (incluso la contraseña),
+      usá el botón «Editar» de la lista. Para eliminar, ingresá el usuario y elegí «Eliminar».
+      La contraseña debe ser alfanumérica y tener al menos 8 caracteres.
+    </p>
+    <form method="post" id="userForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="filters__grid filters__grid--top">
+        <div class="field">
+          <label for="fieldUsername">Usuario</label>
+          <input type="text" name="username" id="fieldUsername" required>
         </div>
-
-        <div class="search-row">
-          <input type="text" id="userSearch" placeholder="Buscar por usuario o nombre...">
+        <div class="field">
+          <label for="fieldNombre">Nombre y Apellido</label>
+          <input type="text" name="nombre" id="fieldNombre">
         </div>
-        <table id="userTable">
-          <thead>
-            <tr>
-              <th>Usuario</th>
-              <th>Nombre y Apellido</th>
-              <th>Rol</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for user in users %}
-              <tr data-username="{{ user.username|lower }}" data-nombre="{{ (user.nombre or '')|lower }}">
-                <td data-label="Usuario">{{ user.username }}</td>
-                <td data-label="Nombre y Apellido">{{ user.nombre or '—' }}</td>
-                <td data-label="Rol"><span class="badge">{{ user.role }}</span></td>
-                <td>
-                  <button type="button" class="button small edit-user-button"
-                          data-username="{{ user.username }}" data-nombre="{{ user.nombre or '' }}" data-role="{{ user.role }}">
-                    Editar
-                  </button>
-                </td>
-              </tr>
+        <div class="field">
+          <label for="fieldPassword">Contraseña</label>
+          <input type="password" name="password" id="fieldPassword" minlength="8" pattern="[A-Za-z0-9]+">
+        </div>
+        <div class="field">
+          <label for="fieldRole">Roles</label>
+          {# Multi-selección: hay usuarias que son finanzas Y cajera. Con un
+             select simple, editarlas desde acá les borraba el segundo rol. #}
+          <select name="roles" id="fieldRole" multiple size="5" required style="height: auto;">
+            {% for option in user_options %}
+              <option value="{{ option }}">{{ option }}</option>
             {% endfor %}
-          </tbody>
-        </table>
+          </select>
+          <p class="field__hint">Ctrl+clic para elegir más de uno.</p>
+        </div>
+        <div class="field">
+          <label for="fieldAction">Acción</label>
+          <select name="action" id="fieldAction" required>
+            <option value="create">Crear</option>
+            <option value="update">Actualizar</option>
+            <option value="delete">Eliminar</option>
+          </select>
+        </div>
+      </div>
+      <div class="toolbar__actions" style="margin-top: 1rem;">
+        <button type="submit" class="btn btn--primary">Guardar</button>
+        <button type="button" class="btn btn--ghost" id="clearFormButton">Limpiar</button>
+      </div>
+    </form>
+  </div>
 
-        {% if role == 'admin' %}
-          <form method="post" action="/admin/clear" onsubmit="return confirm('Confirmar borrado de los movimientos unificados. Esta acción no se puede deshacer.');" style="margin-top:28px;">
-            <button type="submit" class="button" style="background:#dc2626;">Borrar registros importados</button>
-          </form>
-          <p style="color:#64748b; margin-top:10px; font-size:0.9rem;">Uso exclusivo en pruebas: vacía los movimientos unificados. No borra usuarios ni archivos subidos en <code>/uploads</code>. En productivo no se debe usar.</p>
-        {% endif %}
+  <div class="card">
+    <div class="toolbar">
+      <div>
+        <div class="card__title">Usuarios</div>
+        <div class="toolbar__info">{{ users|length }} usuario(s) registrado(s)</div>
+      </div>
+      <div class="toolbar__actions" style="flex: 1; justify-content: flex-end;">
+        <input type="text" id="userSearch" class="ci-cell-field" style="width: min(280px, 100%);"
+               placeholder="Buscar por usuario o nombre...">
       </div>
     </div>
-    <script>
-      const form = document.getElementById('userForm');
-      const fieldUsername = document.getElementById('fieldUsername');
-      const fieldNombre = document.getElementById('fieldNombre');
-      const fieldPassword = document.getElementById('fieldPassword');
-      const fieldRole = document.getElementById('fieldRole');
-      const fieldAction = document.getElementById('fieldAction');
-      const formTitle = document.getElementById('formTitle');
+    <div class="table-wrap">
+      <table class="data" id="userTable">
+        <thead>
+          <tr>
+            <th>Usuario</th>
+            <th>Nombre y Apellido</th>
+            <th>Roles</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+            <tr data-username="{{ user.username|lower }}" data-nombre="{{ (user.nombre or '')|lower }}">
+              <td data-label="Usuario">{{ user.username }}</td>
+              <td data-label="Nombre y Apellido">{{ user.nombre or '—' }}</td>
+              <td data-label="Roles">
+                {% for r in user_roles(user) %}<span class="badge badge--success">{{ r }}</span> {% endfor %}
+              </td>
+              <td>
+                <button type="button" class="btn btn--ghost btn--sm edit-user-button"
+                        data-username="{{ user.username }}" data-nombre="{{ user.nombre or '' }}"
+                        data-roles="{{ user_roles(user) | join(',') }}">
+                  Editar
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 
-      document.querySelectorAll('.edit-user-button').forEach(function (button) {
-        button.addEventListener('click', function () {
-          fieldUsername.value = button.dataset.username;
-          fieldNombre.value = button.dataset.nombre;
-          fieldRole.value = button.dataset.role;
-          fieldPassword.value = '';
-          fieldAction.value = 'update';
-          formTitle.textContent = 'Editando: ' + button.dataset.username;
-          form.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          fieldPassword.focus();
-        });
-      });
+  {% if has_role('admin') %}
+    <div class="card">
+      <div class="card__title">Zona de pruebas</div>
+      <p class="card__hint">
+        Vacía los movimientos unificados. No borra usuarios ni los archivos subidos en
+        <code class="mono">/uploads</code>. En productivo no se debe usar.
+      </p>
+      <form method="post" action="/admin/clear" onsubmit="return confirm('Confirmar borrado de los movimientos unificados. Esta acción no se puede deshacer.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn--danger">Borrar registros importados</button>
+      </form>
+    </div>
+  {% endif %}
+{% endblock %}
 
-      document.getElementById('clearFormButton').addEventListener('click', function () {
-        form.reset();
-        fieldAction.value = 'create';
-        formTitle.textContent = 'Agregar / editar usuario';
-      });
+{% block scripts %}
+<script>
+  const form = document.getElementById('userForm');
+  const fieldUsername = document.getElementById('fieldUsername');
+  const fieldNombre = document.getElementById('fieldNombre');
+  const fieldPassword = document.getElementById('fieldPassword');
+  const fieldRole = document.getElementById('fieldRole');
+  const fieldAction = document.getElementById('fieldAction');
+  const formTitle = document.getElementById('formTitle');
 
-      document.getElementById('userSearch').addEventListener('input', function () {
-        const term = this.value.trim().toLowerCase();
-        document.querySelectorAll('#userTable tbody tr').forEach(function (row) {
-          const matches = row.dataset.username.includes(term) || row.dataset.nombre.includes(term);
-          row.style.display = matches ? '' : 'none';
-        });
+  document.querySelectorAll('.edit-user-button').forEach(function (button) {
+    button.addEventListener('click', function () {
+      fieldUsername.value = button.dataset.username;
+      fieldNombre.value = button.dataset.nombre;
+      const roles = (button.dataset.roles || '').split(',').filter(Boolean);
+      Array.from(fieldRole.options).forEach(function (opt) {
+        opt.selected = roles.includes(opt.value);
       });
-    </script>
-  </body>
-</html>
+      fieldPassword.value = '';
+      fieldAction.value = 'update';
+      formTitle.textContent = 'Editando: ' + button.dataset.username;
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      fieldPassword.focus();
+    });
+  });
+
+  document.getElementById('clearFormButton').addEventListener('click', function () {
+    form.reset();
+    Array.from(fieldRole.options).forEach(function (opt) { opt.selected = false; });
+    fieldAction.value = 'create';
+    formTitle.textContent = 'Agregar / editar usuario';
+  });
+
+  document.getElementById('userSearch').addEventListener('input', function () {
+    const term = this.value.trim().toLowerCase();
+    document.querySelectorAll('#userTable tbody tr').forEach(function (row) {
+      const matches = row.dataset.username.includes(term) || row.dataset.nombre.includes(term);
+      row.style.display = matches ? '' : 'none';
+    });
+  });
+</script>
+{% endblock %}

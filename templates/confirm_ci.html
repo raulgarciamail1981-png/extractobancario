@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Conciliador Neostar · Confirmar CI{% endblock %}
+
+{% block content %}
+  <section class="hero">
+    <span class="hero__eyebrow">Revisión antes de guardar</span>
+    <h1 class="hero__title">Estás asignando CI en <span>registros de otras empresas</span></h1>
+    <p class="hero__subtitle">
+      {% if guardados %}
+        Ya se guardaron {{ guardados }} CI de tus empresas
+        {% if empresas_primarias %}({{ empresas_primarias | join(', ') }}){% endif %}.
+      {% endif %}
+      Los siguientes {{ pendientes | length }} movimiento(s) pertenecen a empresas que no tenés
+      asignadas. Revisalos: si están bien, confirmá el guardado; si no, volvé y corregilos.
+    </p>
+  </section>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Empresa</th>
+            <th>Banco</th>
+            <th>Descripción</th>
+            <th>Monto</th>
+            <th>CI actual</th>
+            <th>CI a guardar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fila in pendientes %}
+            <tr>
+              <td data-label="Fecha">{{ fila.Fecha_display }}</td>
+              <td data-label="Empresa"><span class="badge badge--warning">{{ fila.Empresa }}</span></td>
+              <td data-label="Banco">{{ fila.Banco }}</td>
+              <td class="cell--wrap" data-label="Descripción">{{ fila.Descripcion }}</td>
+              <td class="cell--num" data-label="Monto">{{ fila.Monto }}</td>
+              <td data-label="CI actual">{{ fila.CI or '—' }}</td>
+              <td data-label="CI a guardar"><strong>{{ fila.ci_nuevo }}</strong></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="toolbar__actions" style="margin-top: 1.4rem;">
+      <form method="post" action="/records" style="display: inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="confirmar_ajenas" value="1">
+        {% for fila in pendientes %}
+          <input type="hidden" name="record_hash" value="{{ fila.RecordHash }}">
+          <input type="hidden" name="ci_{{ fila.RecordHash }}" value="{{ fila.ci_nuevo }}">
+        {% endfor %}
+        <button type="submit" class="btn btn--primary">Confirmar guardado de CI</button>
+      </form>
+      <a class="btn btn--ghost" href="/records?{{ filters_query }}">Corregir</a>
+    </div>
+    <p class="card__hint" style="margin: 0.8rem 0 0;">
+      «Corregir» te devuelve a la grilla sin guardar estos {{ pendientes | length }} movimiento(s).
+    </p>
+  </div>
+{% endblock %}

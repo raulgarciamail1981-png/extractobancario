@@ -172,7 +172,11 @@ def _find_reconcilable_match(conn, banco: str, cuenta: str, fecha: str,
     # "Referencia" que Santander asigna a cada movimiento sí se mantiene
     # estable entre reclasificaciones y es lo que realmente identifica al
     # movimiento sin ambigüedad.
-    if not banco or banco.strip().lower() != 'santander':
+    # Por substring y no por igualdad: el nombre visible del banco puede
+    # cambiar (hoy es "Santander RIO") y esta lógica tiene que seguir
+    # aplicándose igual, o vuelven a entrar duplicados de los movimientos
+    # "a confirmar".
+    if not banco or 'santander' not in banco.strip().lower():
         return None
     if not fecha or monto is None:
         return None

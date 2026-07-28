@@ -1,43 +1,21 @@
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Conciliador Neostar - Resultado</title>
-    <style>
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #eef2ff; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #0f172a; }
-      .card { width: min(560px, calc(100vw - 32px)); background: #ffffff; border-radius: 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12); padding: 32px; }
-      .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
-      .logo-img { height: 36px; width: auto; }
-      .logo-title { margin: 0; font-size: 1.35rem; font-weight: 700; }
-      .message { border-radius: 18px; padding: 18px; margin-bottom: 24px; font-size: 1rem; white-space: pre-line; }
-      .message.success { background: #ecfdf5; color: #166534; }
-      .message.error { background: #fee2e2; color: #b91c1c; }
-      .menu-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
-      .menu-link { display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 14px; text-decoration: none; background: #4338ca; color: #fff; font-weight: 700; }
-      .menu-link:hover { background: #3730a3; }
-      .button { border: none; border-radius: 14px; padding: 14px 18px; background: #4338ca; color: #fff; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-block; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <div class="logo">
-        <img class="logo-img" src="{{ url_for('static', filename='neostar-logo.jpg') }}" alt="Neostar">
-        <h1 class="logo-title">Resultado</h1>
-      </div>
-      <div class="menu-row" style="margin-bottom:16px;">
-        <a class="menu-link" href="/upload">Carga</a>
-        <a class="menu-link" href="/records">Resumen</a>
-        {% if role == 'admin' %}<a class="menu-link" href="/admin">Admin</a>{% endif %}
-        <a class="menu-link" href="/logout">Salir</a>
-      </div>
-      {% if message %}
-        <div class="message success">{{ message }}</div>
-      {% endif %}
-      {% if error %}
-        <div class="message error">{{ error }}</div>
-      {% endif %}
-      <a href="/upload" class="button">Volver a la carga</a>
+{% extends 'base.html' %}
+{% block title %}Conciliador Neostar · Resultado{% endblock %}
+
+{% block content %}
+  <div class="card card--centered">
+    <h1 class="card__title">Resultado</h1>
+    <p class="card__hint">Detalle de la última unificación.</p>
+
+    {% if message %}
+      <div class="alert alert--ok alert--block">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+      <div class="alert alert--error alert--block">{{ error }}</div>
+    {% endif %}
+
+    <div class="toolbar__actions">
+      <a class="btn btn--primary" href="/upload">Volver a la carga</a>
+      <a class="btn btn--ghost" href="/records">Ver el resumen</a>
     </div>
-  </body>
-</html>
+  </div>
+{% endblock %}

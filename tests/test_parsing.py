@@ -149,9 +149,13 @@ def test_hash_record_ignores_cosmetic_formatting_differences_in_description():
 def test_canonicalize_bank_name_normalizes_case_variants():
     # "Datos Bancarios" puede traer el banco en mayúsculas, distinto de como
     # lo escribe guess_bank() por nombre de archivo; deben terminar iguales.
-    assert canonicalize_bank_name('SANTANDER') == 'Santander'
-    assert canonicalize_bank_name('santander') == 'Santander'
-    assert canonicalize_bank_name('Santander') == 'Santander'
+    assert canonicalize_bank_name('SANTANDER') == 'Santander RIO'
+    assert canonicalize_bank_name('santander') == 'Santander RIO'
+    assert canonicalize_bank_name('Santander') == 'Santander RIO'
+    # Ya canonizado: renombrar no puede volver a prefijar ni duplicar.
+    assert canonicalize_bank_name('Santander RIO') == 'Santander RIO'
+    assert canonicalize_bank_name('BANCO MUNICIPAL') == 'Banco Municipal'
+    assert canonicalize_bank_name('Municipal') == 'Banco Municipal'
 
 
 def test_canonicalize_bank_name_leaves_unknown_bank_unchanged():

@@ -23,6 +23,10 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       SECRET_KEY: ${SECRET_KEY}
+      # Caddy es el único que le habla a este servicio, así que se puede
+      # confiar en el X-Forwarded-For que agrega: sin esto, el límite de
+      # intentos de login vería la IP del proxy para todos los usuarios.
+      TRUST_PROXY_HEADERS: "1"
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/users.json:/app/users.json

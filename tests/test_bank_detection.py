@@ -216,8 +216,8 @@ def test_gather_statements_santander_text_loads_both_pending_and_confirmed_secti
     confirmed = df[df['Fecha'] == pd.Timestamp('2026-07-16')].iloc[0]
     # "SANTANDER" (mayúsculas, tal como viene de Datos Bancarios) se
     # canoniza a la forma consistente usada en toda la app.
-    assert pending['Banco'] == 'Santander'
-    assert confirmed['Banco'] == 'Santander'
+    assert pending['Banco'] == 'Santander RIO'
+    assert confirmed['Banco'] == 'Santander RIO'
     assert pending['Descripcion'] == '0000 | Casa Central | 1111 | 000001 | Pendiente no confirmado'
     assert pending['Monto'] == 100.00
     assert pd.isna(pending['Saldo'])

@@ -1,0 +1,18 @@
+{
+  "_comentario": [
+    "Plantilla de users.json. Copiar a users.json y reemplazar por los usuarios reales.",
+    "El usuario de ejemplo es admin / cambiame123: cambiale la contraseña apenas entres,",
+    "o mejor, generá el hash vos con:",
+    "  python -c \"from werkzeug.security import generate_password_hash as g; print(g('TU-CLAVE'))\"",
+    "Roles válidos: admin, uploader, viewer, cajera, finanzas.",
+    "users.json NO se sube al repositorio (tiene credenciales reales)."
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "password": "scrypt:32768:8:1$NMqCwFn59kzhzhmY$74d6b4c702b0bdcd4bc3209841fe5a950a827375d32867d74d5b8cf6c4f76ff700c5c8b3f44f324e1f83cea1e3cdd36db2f82362c37e0c85e82c780928fc62c9",
+      "role": "admin",
+      "nombre": "Administrador"
+    }
+  ]
+}

@@ -42,7 +42,12 @@ mkdir -p data/uploads
 Copiar ahí los archivos maestros reales (los mismos que hoy usa la app en la
 PC de Windows):
 
-- `users.json` → `data/users.json`
+- `users.json` → `data/users.json` — si todavía no existe, arrancar desde la
+  plantilla del repo: `cp users.example.json data/users.json`. Trae un solo
+  usuario `admin` con contraseña `cambiame123`; **cambiala apenas entres**
+  (Admin → Editar, o desde "Cambiar contraseña"). Sin este archivo la app
+  levanta igual, pero el login avisa que no hay usuarios configurados y nadie
+  puede entrar.
 - `Empresas.xlsx` → `data/Empresas.xlsx`
 - `DATOS BANCARIOS TODAS LAS EMPRESAS.xlsx` → `data/DATOS BANCARIOS TODAS LAS EMPRESAS.xlsx`
 
@@ -103,6 +108,27 @@ se puede correr de nuevo sin duplicar si algo falla a mitad de camino.
 - Subir un extracto nuevo y unificarlo funciona de punta a punta.
 - Desde otra PC/ubicación (fuera de la red del VPS), `https://<DOMAIN>/`
   también carga — confirma que el acceso remoto multi-usuario ya funciona.
+
+## Seguridad de la sesión
+
+Ya viene configurado, no hay que tocar nada para el deploy con Docker, pero
+conviene saberlo:
+
+- **Cookie de sesión**: `HttpOnly`, `SameSite=Lax` y `Secure` (solo viaja por
+  HTTPS). Si alguna vez levantás la app por HTTP plano fuera de Docker,
+  `python web_app.py` ya apaga `Secure` solo; para otro entrypoint, exportá
+  `CONCILIADOR_INSECURE_COOKIES=1`.
+- **CSRF**: todos los formularios llevan token. Si aparece un `400 Bad Request`
+  al enviar un formulario, suele ser una pestaña vieja abierta desde antes de
+  reiniciar la app — recargar la página lo resuelve.
+- **Intentos de login**: después de 5 fallidos con el mismo usuario desde la
+  misma IP, ese par queda bloqueado 5 minutos y la app responde 429. El bloqueo
+  se registra una vez en la auditoría (`login_blocked`). Se libera solo con el
+  tiempo, o reiniciando la app (`docker compose restart web`) si alguien
+  necesita entrar ya.
+- `TRUST_PROXY_HEADERS=1` está puesto en `docker-compose.yml` para que la app
+  vea la IP real del usuario y no la de Caddy. **No lo actives si la app queda
+  expuesta sin un proxy adelante**: ahí cualquiera podría falsear su IP.
 
 ## Operación día a día
 

@@ -1,0 +1,420 @@
+/* Sistema visual del Conciliador Neostar.
+   Los tokens y los componentes base (header, cards, botones, tablas, badges)
+   son los mismos que usa el Lector de Facturas I+D, para que las dos apps de
+   Neostar se vean como una sola familia. Cambiar el acento de toda la app es
+   cambiar --green / --green-dark acá abajo. */
+
+:root {
+  /* Paleta Neostar - claro y premium */
+  --green: #34c759;
+  --green-dark: #28a745;
+  --green-soft: #e8f8ee;
+  --green-softer: #f1faf4;
+  --bg: #ffffff;
+  --bg-alt: #f6f8fa;
+  --surface: #ffffff;
+  --border: #e7ebef;
+  --border-strong: #d6dce2;
+  --text: #0f1721;
+  --text-soft: #5b6675;
+  --text-muted: #8a93a0;
+  --danger: #ef4444;
+  --danger-soft: #fef2f2;
+  --danger-strong: #b91c1c;
+  --warning: #f59e0b;
+  --warning-soft: #fff8ec;
+  --warning-strong: #9a3412;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --shadow: 0 10px 30px rgba(16, 28, 44, 0.07);
+  --shadow-sm: 0 2px 8px rgba(16, 28, 44, 0.05);
+  --font: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--green-dark); text-decoration: none; }
+
+/* ----------------------------- layout ----------------------------------- */
+.layout { min-height: 100%; display: flex; flex-direction: column; }
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 2.2rem 2rem 4rem;
+}
+/* La grilla de movimientos necesita más ancho que el resto de las pantallas. */
+.main--wide { max-width: 1640px; }
+
+/* ----------------------------- header ----------------------------------- */
+.header {
+  width: 100%;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.header__bar {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0.9rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.header__bar--wide { max-width: 1640px; }
+.header__brand { display: flex; align-items: center; gap: 0.85rem; }
+.header__logo { height: 26px; width: auto; object-fit: contain; }
+.header__app {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  padding-left: 0.85rem;
+  border-left: 1px solid var(--border-strong);
+}
+.header__right { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.header__nav { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.navlink {
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-soft);
+  transition: all 0.18s ease;
+}
+.navlink:hover { background: var(--bg-alt); color: var(--text); }
+.navlink--active { background: var(--green); color: #fff; }
+.navlink--active:hover { background: var(--green-dark); color: #fff; }
+.navlink--exit { color: var(--text-muted); }
+
+/* Chip con el usuario y el rol de la sesión. */
+.userchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+.userchip__role {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--green-dark);
+}
+
+/* ----------------------------- hero ------------------------------------- */
+.hero { margin-bottom: 1.8rem; }
+.hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green-dark);
+  background: var(--green-soft);
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  margin-bottom: 1rem;
+}
+.hero__title {
+  font-size: 2.4rem;
+  line-height: 1.08;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.hero__title span { color: var(--green); }
+.hero__subtitle { margin-top: 0.7rem; color: var(--text-soft); font-size: 1.05rem; max-width: 70ch; }
+
+/* ----------------------------- cards ------------------------------------ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.6rem;
+}
+.card + .card { margin-top: 1.5rem; }
+.card--centered {
+  width: min(460px, 100%);
+  margin: 3.5rem auto;
+  box-shadow: var(--shadow);
+}
+.card__title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.card__hint { color: var(--text-muted); font-size: 0.92rem; margin-bottom: 1.2rem; }
+
+/* ----------------------------- upload ----------------------------------- */
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 2.6rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  background: var(--bg-alt);
+}
+.dropzone:hover, .dropzone--active {
+  border-color: var(--green);
+  background: var(--green-softer);
+}
+.dropzone__icon { font-size: 2.4rem; }
+.dropzone__title { font-weight: 700; margin-top: 0.6rem; }
+.dropzone__hint { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
+
+/* ----------------------------- buttons ---------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0.65rem 1.3rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-decoration: none;
+}
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn--primary { background: var(--green); color: #fff; }
+.btn--primary:hover:not(:disabled) { background: var(--green-dark); color: #fff; }
+.btn--ghost { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
+.btn--ghost:hover:not(:disabled) { background: var(--bg-alt); color: var(--text); }
+.btn--danger { background: var(--danger); color: #fff; }
+.btn--danger:hover:not(:disabled) { background: #dc2626; color: #fff; }
+.btn--sm { padding: 0.4rem 0.85rem; font-size: 0.85rem; }
+.btn--block { width: 100%; }
+
+/* ----------------------------- toolbar / tablas -------------------------- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.1rem;
+  flex-wrap: wrap;
+}
+.toolbar__info { color: var(--text-soft); font-size: 0.95rem; }
+.toolbar__actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.data thead th {
+  background: var(--bg-alt);
+  text-align: left;
+  padding: 0.8rem 0.9rem;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.data tbody td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.data tbody tr:last-child td { border-bottom: none; }
+/* Cebra: en una grilla densa de movimientos ayuda a seguir la fila. */
+.data tbody tr:nth-child(even) { background: var(--bg-alt); }
+.data tbody tr:hover { background: var(--green-softer); }
+.data .cell--wrap { max-width: 280px; white-space: normal; word-break: break-word; }
+.data .cell--num { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.data .cell--neg { color: var(--danger); }
+
+/* ----------------------------- formularios ------------------------------- */
+.field { margin-bottom: 1rem; }
+.field label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.4rem; }
+.field input, .field select {
+  width: 100%; padding: 0.6rem 0.8rem; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); font-family: inherit; font-size: 0.95rem;
+  background: var(--surface); color: var(--text);
+  /* Altura fija: el <select> nativo es un par de píxeles más alto que el
+     <input>, y en una grilla de filtros eso desalinea las etiquetas. */
+  height: 42px;
+}
+.field input:focus, .field select:focus {
+  outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft);
+}
+.field__hint { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.35rem; }
+
+.filters {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.3rem;
+  margin-bottom: 1.4rem;
+}
+.filters__title {
+  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-soft); margin-bottom: 0.9rem;
+}
+.filters__grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 0.9rem; align-items: end;
+}
+.filters__grid + .filters__grid { margin-top: 0.9rem; }
+/* Para formularios con un campo más alto que el resto (ej. el multi-select de
+   roles): alinear al tope, o los campos bajos quedan empujados hacia abajo. */
+.filters__grid--top { align-items: start; }
+.filters__actions { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; margin-top: 1rem; }
+.filters .field { margin-bottom: 0; }
+
+/* Campo de CI dentro de la grilla. */
+.ci-cell-field {
+  width: 92px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.ci-cell-field:focus {
+  outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft);
+}
+/* Acreditación sin CI pasada de fecha: se resalta el recuadro. */
+.ci-cell-field.ci-alert { background: var(--danger-soft); border-color: #f7c5c5; }
+
+/* ----------------------------- resumen de CI ----------------------------- */
+.ci-summary-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 0.9rem; margin-bottom: 1.5rem;
+}
+.ci-summary-card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+  box-shadow: var(--shadow-sm);
+}
+.ci-summary-card.ci-summary-total { border-color: var(--green); background: var(--green-softer); }
+.ci-summary-name {
+  font-weight: 700; font-size: 0.75rem; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-soft); margin-bottom: 0.15rem;
+}
+.ci-summary-total .ci-summary-name { color: var(--green-dark); }
+.ci-summary-line { color: var(--text-soft); font-size: 0.85rem; }
+.ci-summary-line:hover { color: var(--text); text-decoration: underline; }
+.ci-summary-line strong { font-size: 1.15rem; color: var(--text); }
+/* Rojo, no ámbar: es el mismo estado que ya se marca en rojo en la grilla
+   (el recuadro de CI de una acreditación vencida). */
+.ci-summary-line--alert strong { color: var(--danger); }
+
+/* ----------------------------- badges / alerts --------------------------- */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.badge--success { background: var(--green-soft); color: var(--green-dark); }
+.badge--warning { background: var(--warning-soft); color: var(--warning); }
+.badge--danger { background: var(--danger-soft); color: var(--danger); }
+.badge--muted { background: var(--bg-alt); color: var(--text-muted); }
+
+.alert {
+  padding: 0.8rem 1rem; border-radius: var(--radius-sm);
+  font-size: 0.92rem; margin-bottom: 1rem;
+}
+.alert--error { background: var(--danger-soft); color: var(--danger-strong); }
+.alert--ok { background: var(--green-soft); color: var(--green-dark); }
+.alert--notice {
+  background: var(--warning-soft); color: var(--warning-strong);
+  display: none; justify-content: space-between; align-items: center;
+  gap: 0.8rem; flex-wrap: wrap;
+}
+/* El texto de /unify llega con saltos de línea reales. */
+.alert--block { white-space: pre-line; }
+
+.empty { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
+.empty__icon { font-size: 2.6rem; opacity: 0.6; }
+
+.mono {
+  background: var(--bg-alt); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.15rem 0.45rem; font-size: 0.82rem; word-break: break-word;
+}
+
+/* ----------------------------- barra Guardar CI -------------------------- */
+.save-ci-bar {
+  position: fixed; bottom: 1.4rem; right: 1.4rem; z-index: 50;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.85rem 1.1rem;
+  display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: center;
+}
+.save-ci-bar__hint { color: var(--text-muted); font-size: 0.85rem; }
+body.has-save-ci-bar .main { padding-bottom: 6rem; }
+
+/* ----------------------------- mobile ------------------------------------ */
+@media (max-width: 860px) {
+  .main { padding: 1.4rem 1rem 3rem; }
+  .header__bar { padding: 0.8rem 1rem; gap: 0.8rem; }
+  .header__app { display: none; }
+  .hero__title { font-size: 1.9rem; }
+  .ci-summary-grid { grid-template-columns: 1fr; }
+
+  /* La grilla pasa a tarjetas apiladas: cada celda muestra su etiqueta. */
+  .table-wrap { overflow-x: visible; border: none; border-radius: 0; }
+  table.data, .data thead, .data tbody, .data th, .data td, .data tr { display: block; }
+  .data thead { display: none; }
+  .data tbody tr {
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    margin-bottom: 0.8rem; padding: 0.35rem 0.8rem; background: var(--surface);
+  }
+  .data tbody tr:nth-child(even) { background: var(--bg-alt); }
+  .data tbody td {
+    border: none; border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0 0.5rem 42%; text-align: right; position: relative; min-height: 1.25rem;
+  }
+  .data tbody tr td:last-child { border-bottom: none; }
+  .data tbody td::before {
+    content: attr(data-label); position: absolute; left: 0; top: 0.5rem; width: 38%;
+    text-align: left; font-weight: 700; color: var(--text-soft);
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .data .cell--wrap, .data .cell--num { max-width: none; text-align: right; }
+  .ci-cell-field { width: 100%; max-width: 160px; }
+
+  .save-ci-bar {
+    left: 0; right: 0; bottom: 0; border-radius: var(--radius) var(--radius) 0 0;
+    justify-content: center; text-align: center;
+  }
+}

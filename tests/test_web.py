@@ -1,15 +1,23 @@
 import io
 import json
+import re
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import pytest
 from openpyxl import Workbook, load_workbook
 from pypdf import PdfReader
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import db
 import web_app
+from conciliador import hash_record
+
+# Carpeta real del proyecto: web_app.BASE_DIR queda apuntando al tmp_path del
+# fixture, así que no sirve para leer templates ni assets versionados.
+PROJECT_DIR = Path(web_app.__file__).resolve().parent
 
 
 @pytest.fixture
@@ -29,14 +37,29 @@ def app_env(tmp_path, monkeypatch):
     # comportamiento que antes de tener un listado fijo).
     empresas_path = tmp_path / 'Empresas.xlsx'
 
+    # BASE_DIR también se aísla: /unify busca ahí "DATOS BANCARIOS TODAS LAS
+    # EMPRESAS.xlsx". Sin esto, los tests leen la carpeta real del proyecto y
+    # el resultado depende de si esa máquina tiene el archivo de la empresa.
+    monkeypatch.setattr(web_app, 'BASE_DIR', tmp_path)
     monkeypatch.setattr(web_app, 'DB_PATH', db_path)
     monkeypatch.setattr(web_app, 'UPLOAD_DIR', upload_dir)
     monkeypatch.setattr(web_app, 'USERS_FILE', users_file)
     monkeypatch.setattr(web_app, 'EMPRESAS_PATH', empresas_path)
     monkeypatch.setattr(web_app, 'users_by_name', {u['username']: u for u in users})
 
-    web_app.app.config.update(TESTING=True)
-    return {'db_path': db_path, 'upload_dir': upload_dir, 'users_file': users_file, 'empresas_path': empresas_path}
+    # El throttle de login vive en memoria del módulo: sin limpiarlo, los
+    # fallos de un test bloquean el login del siguiente.
+    monkeypatch.setattr(web_app, '_login_failures', {})
+
+    # CSRF apagado por defecto para no tener que pedir un token en cada POST de
+    # los tests. Que la protección esté realmente activa se verifica aparte, en
+    # los tests que la encienden a propósito.
+    web_app.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
+    return {
+        'db_path': db_path, 'upload_dir': upload_dir, 'users_file': users_file,
+        'empresas_path': empresas_path,
+        'bank_accounts_path': tmp_path / 'DATOS BANCARIOS TODAS LAS EMPRESAS.xlsx',
+    }
 
 
 @pytest.fixture
@@ -382,7 +405,46 @@ def test_admin_update_user_preserves_nombre_when_left_blank(client, app_env):
     users_after = json.loads(app_env['users_file'].read_text(encoding='utf-8'))
     nueva = next(u for u in users_after['users'] if u['username'] == 'nueva')
     assert nueva['nombre'] == 'Juana Perez'
-    assert nueva['role'] == 'cajera'
+    # Los roles se guardan como lista: hay usuarias con más de uno.
+    assert nueva['roles'] == ['cajera']
+
+
+def test_admin_update_does_not_drop_the_second_role(client, app_env):
+    # Editar desde el admin a una usuaria finanzas+cajera no puede dejarla con
+    # uno solo por el simple hecho de haber tocado otro campo.
+    login(client, 'admin', 'adminpass')
+    client.post('/admin', data={
+        'action': 'create', 'username': 'doble', 'password': 'pass12345',
+        'roles': ['finanzas', 'cajera'], 'nombre': 'Finanzas Y Cajera',
+    })
+
+    client.post('/admin', data={
+        'action': 'update', 'username': 'doble', 'roles': ['finanzas', 'cajera'],
+        'nombre': 'Finanzas Y Cajera',
+    })
+
+    users_after = json.loads(app_env['users_file'].read_text(encoding='utf-8'))
+    doble = next(u for u in users_after['users'] if u['username'] == 'doble')
+    assert sorted(doble['roles']) == ['cajera', 'finanzas']
+
+
+def test_admin_update_preserves_company_assignments(client, app_env):
+    # Las empresas asignadas no se editan desde este formulario: tocar el rol
+    # de una cajera no puede borrárselas.
+    users = json.loads(app_env['users_file'].read_text(encoding='utf-8'))
+    users['users'].append({
+        'username': 'cajera1', 'nombre': 'Cajera Uno', 'password': 'x', 'roles': ['cajera'],
+        'empresas_primarias': ['ALCO'], 'empresas_secundarias': ['HIKARI'],
+    })
+    app_env['users_file'].write_text(json.dumps(users), encoding='utf-8')
+    login(client, 'admin', 'adminpass')
+
+    client.post('/admin', data={'action': 'update', 'username': 'cajera1', 'roles': ['cajera']})
+
+    after = json.loads(app_env['users_file'].read_text(encoding='utf-8'))
+    cajera1 = next(u for u in after['users'] if u['username'] == 'cajera1')
+    assert cajera1['empresas_primarias'] == ['ALCO']
+    assert cajera1['empresas_secundarias'] == ['HIKARI']
 
 
 def test_is_valid_password_requires_length_and_alphanumeric():
@@ -629,12 +691,49 @@ def test_records_ci_summary_box_click_filters_to_that_company(client, app_env):
     assert 'Mov B reciente' not in body
 
 
+def test_empresa_dropdown_lists_master_companies_without_movements(client, app_env):
+    # Una empresa recién dada de alta en Empresas.xlsx tiene que poder
+    # elegirse aunque todavía no haya cargado extractos: si no figura, no hay
+    # forma de distinguir "no cargó nada" de "está mal dada de alta".
+    _write_empresas_file(app_env['empresas_path'], [
+        ('20111111116', 'Hikari SA'),
+        ('20222222223', 'Neostar SA'),
+    ])
+    _seed_movements(app_env['db_path'], [{'Empresa': 'Hikari SA', 'Banco': 'Galicia'}])
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/records').get_data(as_text=True)
+
+    assert '<option value="Neostar SA"' in body
+    assert '<option value="Hikari SA"' in body
+
+
+def test_selecting_a_company_without_movements_shows_an_empty_grid(client, app_env):
+    _write_empresas_file(app_env['empresas_path'], [
+        ('20111111116', 'Hikari SA'),
+        ('20222222223', 'Neostar SA'),
+    ])
+    _seed_movements(app_env['db_path'], [
+        {'Empresa': 'Hikari SA', 'Descripcion': 'Movimiento de Hikari'},
+    ])
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/records?empresa=Neostar+SA').get_data(as_text=True)
+
+    assert 'No hay movimientos para mostrar' in body
+    assert 'Movimiento de Hikari' not in body
+
+
 def test_records_table_rows_have_zebra_striping(client, app_env):
     login(client, 'admin', 'adminpass')
 
     body = client.get('/records').get_data(as_text=True)
 
-    assert 'nth-child(even)' in body
+    # El CSS vive en una hoja compartida, no embebido en cada template: se
+    # verifica que la página la enlace y que la hoja tenga la regla.
+    assert 'css/app.css' in body
+    stylesheet = (PROJECT_DIR / 'static' / 'css' / 'app.css').read_text(encoding='utf-8')
+    assert 'nth-child(even)' in stylesheet
 
 
 def _write_empresas_file(path, companies):
@@ -722,4 +821,323 @@ def test_download_pdf_is_real_pdf_and_respects_role_and_filters(client, app_env)
     assert 'Empresa A' in text or 'Movimiento de Empresa A' in text
     assert 'Empresa B' not in text
     assert 'Saldo' not in text
+
+
+# --- users.json ausente -------------------------------------------------
+
+def test_load_users_returns_empty_when_file_is_missing(app_env, monkeypatch):
+    # Importar la app no puede depender de un archivo que no está en el repo.
+    monkeypatch.setattr(web_app, 'USERS_FILE', app_env['users_file'].parent / 'no_existe.json')
+
+    assert web_app.load_users() == []
+
+
+def test_login_explains_missing_users_file_instead_of_blaming_credentials(client, monkeypatch):
+    monkeypatch.setattr(web_app, 'users_by_name', {})
+
+    response = client.post('/login', data={'username': 'admin', 'password': 'adminpass'})
+
+    body = response.get_data(as_text=True)
+    assert 'users.json' in body
+    assert 'incorrectos' not in body
+
+
+def test_users_example_file_is_a_valid_template():
+    # Es el archivo que alguien va a copiar a users.json en un clone limpio.
+    example = json.loads((PROJECT_DIR / 'users.example.json').read_text(encoding='utf-8'))
+    users = example['users']
+
+    assert users, 'la plantilla tiene que traer al menos un usuario'
+    for user in users:
+        assert user['role'] in web_app.USER_ROLES
+        # El hash tiene que ser verificable: si no, copiar la plantilla
+        # rompe el login con un error de werkzeug en vez de dejar entrar.
+        assert check_password_hash(user['password'], 'cambiame123')
+
+
+# --- resolución de cuentas no registradas -------------------------------
+
+def _write_bank_accounts(path, account='1112223334'):
+    # Layout real de "DATOS BANCARIOS TODAS LAS EMPRESAS.xlsx": tabla pivot con
+    # banco y moneda en las dos primeras columnas y una columna por empresa.
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['BANCO', 'MONEDA', 'EMPRESA TEST SA CUIT 20-11111111-6'])
+    ws.append(['SANTANDER', 'PESOS', account])
+    wb.save(path)
+
+
+def _write_statement_for_unregistered_account(path):
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['Cuenta Nro. 999-888777/6'])
+    ws.append(['Fecha', 'Descripcion', 'Monto', 'Saldo'])
+    ws.append(['16/07/2026', 'Transferencia recibida', '1500,50', '20000,00'])
+    wb.save(path)
+
+
+def _resolve_form_from(body, cuit='20111111116', banco='SANTANDER'):
+    hashes = re.findall(r'name="record_hash_\d+" value="([0-9a-f]+)"', body)
+    data = {'resolve_missing': '1', 'missing_count': str(len(hashes))}
+    for index, record_hash in enumerate(hashes):
+        data[f'record_hash_{index}'] = record_hash
+        data[f'mapping_{index}'] = cuit
+        data[f'bank_{index}'] = banco
+    return hashes, data
+
+
+def test_unify_completes_after_assigning_an_account_not_in_datos_bancarios(client, app_env):
+    # La pantalla de resolución no cambia el número de cuenta, así que el
+    # re-chequeo por cuenta volvía a marcar la fila y devolvía al usuario a la
+    # misma pantalla para siempre: una cuenta nueva no se podía unificar nunca.
+    _write_bank_accounts(app_env['bank_accounts_path'])
+    _write_statement_for_unregistered_account(app_env['upload_dir'] / 'extracto_nuevo.xlsx')
+    login(client, 'admin', 'adminpass')
+
+    first = client.post('/unify')
+    body = first.get_data(as_text=True)
+    # Marcador estructural de la pantalla, no su título: el texto visible es
+    # cosa del diseño y no debería romper este test si se reescribe.
+    assert 'name="resolve_missing"' in body
+
+    hashes, form = _resolve_form_from(body)
+    assert hashes
+
+    second = client.post('/unify', data=form)
+
+    assert 'Archivos procesados' in second.get_data(as_text=True)
+    stored = db.load_movements(db_path=app_env['db_path'])
+    assert len(stored) == 1
+    assert stored.iloc[0]['CUIT'] == '20111111116'
+    assert stored.iloc[0]['Banco'] == 'SANTANDER'
+
+
+def test_unify_recomputes_record_hash_after_manual_assignment(client, app_env):
+    # El hash describe el contenido de la fila e incluye Banco y CUIT, así que
+    # después de asignarlos a mano tiene que cambiar. Si se guardara con el
+    # hash viejo, el día que la cuenta se dé de alta en DATOS BANCARIOS y el
+    # banco pase a detectarse solo, el mismo movimiento entraría de nuevo.
+    _write_bank_accounts(app_env['bank_accounts_path'])
+    _write_statement_for_unregistered_account(app_env['upload_dir'] / 'extracto_nuevo.xlsx')
+    login(client, 'admin', 'adminpass')
+
+    body = client.post('/unify').get_data(as_text=True)
+    original_hashes, form = _resolve_form_from(body)
+    client.post('/unify', data=form)
+
+    stored = db.load_movements(db_path=app_env['db_path'])
+    assert stored.iloc[0]['RecordHash'] not in original_hashes
+
+
+def test_reunifying_the_same_file_with_the_same_assignment_does_not_duplicate(client, app_env):
+    # El hash recalculado tiene que ser determinístico: mismo archivo + misma
+    # asignación manual = mismo movimiento, no uno nuevo.
+    _write_bank_accounts(app_env['bank_accounts_path'])
+    login(client, 'admin', 'adminpass')
+
+    for _ in range(2):
+        _write_statement_for_unregistered_account(app_env['upload_dir'] / 'extracto_nuevo.xlsx')
+        body = client.post('/unify').get_data(as_text=True)
+        _, form = _resolve_form_from(body)
+        assert 'Archivos procesados' in client.post('/unify', data=form).get_data(as_text=True)
+
+    assert len(db.load_movements(db_path=app_env['db_path'])) == 1
+
+
+def test_recompute_record_hashes_leaves_untouched_rows_alone(app_env):
+    # Contracara del test anterior: recalcular una fila que no cambió tiene
+    # que dar exactamente el mismo hash, o cada unificación duplicaría todo.
+    row = {
+        'RecordHash': 'sin_cambios', 'Banco': 'SANTANDER', 'Cuenta': '1112223334',
+        'Fecha': pd.Timestamp('2026-07-16'), 'Monto': 1500.5, 'Saldo': 20000.0,
+        'CUIT': '20111111116', 'Descripcion': 'Transferencia recibida',
+    }
+    df = pd.DataFrame([dict(row, RecordHash=hash_record(row))])
+    before = df.iloc[0]['RecordHash']
+
+    after = web_app.recompute_record_hashes(df, [before])
+
+    assert after.iloc[0]['RecordHash'] == before
+
+
+def test_resolve_screen_lists_each_row_only_once(client, app_env):
+    # Una fila sin Empresa/CUIT y con cuenta no registrada cae en los dos
+    # grupos; se tiene que pedir una sola vez, no dos.
+    _write_bank_accounts(app_env['bank_accounts_path'])
+    _write_statement_for_unregistered_account(app_env['upload_dir'] / 'extracto_nuevo.xlsx')
+    login(client, 'admin', 'adminpass')
+
+    body = client.post('/unify').get_data(as_text=True)
+
+    hashes = re.findall(r'name="record_hash_\d+" value="([0-9a-f]+)"', body)
+    assert len(hashes) == 1
+    assert len(set(hashes)) == 1
+
+
+def test_unify_does_not_ask_to_resolve_rows_the_statement_already_identifies(client, app_env):
+    # Cuenta no registrada en DATOS BANCARIOS, pero el extracto trae Empresa y
+    # CUIT y el nombre del archivo el banco: no hay nada que preguntar.
+    _write_bank_accounts(app_env['bank_accounts_path'])
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['Fecha', 'Descripcion', 'Monto', 'Saldo', 'Cuenta', 'Empresa', 'CUIT'])
+    ws.append(['16/07/2026', 'Transferencia', '1500,50', '20000,00', '999888777',
+               'Empresa Test SA', '20111111116'])
+    wb.save(app_env['upload_dir'] / 'extracto_galicia.xlsx')
+    login(client, 'admin', 'adminpass')
+
+    response = client.post('/unify')
+
+    assert 'Archivos procesados' in response.get_data(as_text=True)
+
+
+# --- descarga de Excel sin archivo temporal compartido -------------------
+
+def test_download_excel_does_not_write_a_shared_temp_file(client, app_env):
+    # Se generaba en UPLOAD_DIR con un nombre fijo: dos descargas simultáneas
+    # se pisaban y una cajera podía terminar con el Excel de un admin (con la
+    # columna Saldo que su rol no debe ver).
+    _seed_movement(app_env['db_path'])
+    login(client, 'admin', 'adminpass')
+
+    resp = client.get('/download/excel')
+
+    assert resp.status_code == 200
+    assert list(app_env['upload_dir'].iterdir()) == []
+
+
+def test_download_excel_keeps_each_role_seeing_its_own_columns(client, app_env):
+    # Dos descargas intercaladas, sin recargar nada en el medio: cada una tiene
+    # que traer sus propias columnas.
+    _seed_movement(app_env['db_path'])
+
+    login(client, 'cajera', 'cajerapass')
+    cajera_bytes = client.get('/download/excel').data
+    client.get('/logout')
+    login(client, 'admin', 'adminpass')
+    admin_bytes = client.get('/download/excel').data
+
+    def headers_of(data):
+        ws = load_workbook(io.BytesIO(data)).active
+        return [c for row in ws.iter_rows(values_only=True) for c in row if c is not None]
+
+    assert 'Saldo' not in headers_of(cajera_bytes)
+    assert 'Saldo' in headers_of(admin_bytes)
+
+
+# --- CSRF ---------------------------------------------------------------
+
+@pytest.fixture
+def csrf_client(app_env):
+    web_app.app.config.update(WTF_CSRF_ENABLED=True)
+    try:
+        with web_app.app.test_client() as test_client:
+            yield test_client
+    finally:
+        web_app.app.config.update(WTF_CSRF_ENABLED=False)
+
+
+def test_post_without_csrf_token_is_rejected(csrf_client):
+    response = csrf_client.post('/login', data={'username': 'admin', 'password': 'adminpass'})
+
+    assert response.status_code == 400
+
+
+def test_post_with_csrf_token_from_the_form_is_accepted(csrf_client, app_env):
+    page = csrf_client.get('/').get_data(as_text=True)
+    token = re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
+
+    response = csrf_client.post(
+        '/login', data={'username': 'admin', 'password': 'adminpass', 'csrf_token': token},
+    )
+
+    assert response.status_code == 302
+    assert any(e['action'] == 'login_success' for e in db.load_audit_log(db_path=app_env['db_path']))
+
+
+@pytest.mark.parametrize('template', [
+    'login.html', 'admin.html', 'change_password.html', 'records.html',
+    'resolve_missing.html', 'upload.html',
+])
+def test_every_post_form_carries_a_csrf_token(template):
+    # Un formulario sin token no falla al renderizar: falla recién cuando un
+    # usuario lo manda. Este test lo detecta antes.
+    html = (PROJECT_DIR / 'templates' / template).read_text(encoding='utf-8')
+
+    assert html.count('method="post"') == html.count('csrf_token()')
+
+
+# --- cookie de sesión ---------------------------------------------------
+
+def test_session_cookie_is_hardened_by_default():
+    assert web_app.app.config['SESSION_COOKIE_HTTPONLY'] is True
+    assert web_app.app.config['SESSION_COOKIE_SAMESITE'] == 'Lax'
+    # El deploy real es HTTPS detrás de Caddy; el opt-out es solo para dev.
+    assert web_app.app.config['SESSION_COOKIE_SECURE'] is True
+
+
+# --- límite de intentos de login ----------------------------------------
+
+def test_login_is_blocked_after_repeated_failures(client, app_env):
+    for _ in range(web_app.LOGIN_MAX_ATTEMPTS - 1):
+        assert client.post('/login', data={'username': 'admin', 'password': 'mal'}).status_code == 200
+
+    blocked = client.post('/login', data={'username': 'admin', 'password': 'mal'})
+
+    assert blocked.status_code == 429
+    assert 'Demasiados intentos' in blocked.get_data(as_text=True)
+    actions = [e['action'] for e in db.load_audit_log(db_path=app_env['db_path'])]
+    assert 'login_blocked' in actions
+
+
+def test_throttled_login_rejects_even_the_correct_password(client):
+    for _ in range(web_app.LOGIN_MAX_ATTEMPTS):
+        client.post('/login', data={'username': 'admin', 'password': 'mal'})
+
+    response = client.post('/login', data={'username': 'admin', 'password': 'adminpass'})
+
+    assert response.status_code == 429
+    with client.session_transaction() as sess:
+        assert 'username' not in sess
+
+
+def test_blocked_attempts_do_not_keep_growing_the_audit_log(client, app_env):
+    for _ in range(web_app.LOGIN_MAX_ATTEMPTS + 5):
+        client.post('/login', data={'username': 'admin', 'password': 'mal'})
+
+    actions = [e['action'] for e in db.load_audit_log(db_path=app_env['db_path'])]
+    assert actions.count('login_blocked') == 1
+
+
+def test_successful_login_clears_previous_failures(client):
+    for _ in range(web_app.LOGIN_MAX_ATTEMPTS - 1):
+        client.post('/login', data={'username': 'admin', 'password': 'mal'})
+
+    assert client.post('/login', data={'username': 'admin', 'password': 'adminpass'}).status_code == 302
+
+    client.get('/logout')
+    for _ in range(web_app.LOGIN_MAX_ATTEMPTS - 1):
+        assert client.post('/login', data={'username': 'admin', 'password': 'mal'}).status_code == 200
+
+
+def test_failures_from_one_user_do_not_block_another(client):
+    for _ in range(web_app.LOGIN_MAX_ATTEMPTS):
+        client.post('/login', data={'username': 'admin', 'password': 'mal'})
+
+    response = client.post('/login', data={'username': 'cajera', 'password': 'cajerapass'})
+
+    assert response.status_code == 302
+
+
+def test_old_failures_fall_out_of_the_window(client, monkeypatch):
+    for _ in range(web_app.LOGIN_MAX_ATTEMPTS):
+        client.post('/login', data={'username': 'admin', 'password': 'mal'})
+    assert client.post('/login', data={'username': 'admin', 'password': 'mal'}).status_code == 429
+
+    real_monotonic = time.monotonic
+    monkeypatch.setattr(
+        web_app.time, 'monotonic', lambda: real_monotonic() + web_app.LOGIN_WINDOW_SECONDS + 1,
+    )
+
+    assert client.post('/login', data={'username': 'admin', 'password': 'adminpass'}).status_code == 302
 
