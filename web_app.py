@@ -176,6 +176,16 @@ def current_user() -> dict:
     return users_by_name.get(session.get('username', ''), {})
 
 
+def puede_quitar_de_la_cola() -> bool:
+    # Permiso individual, no por rol: quitar un archivo de la cola descarta
+    # trabajo de otra persona, así que se habilita nombre por nombre desde
+    # users.json ("puede_quitar_de_cola": true) sin tocar código.
+    return bool(current_user().get('puede_quitar_de_cola'))
+
+
+app.jinja_env.globals['puede_quitar_de_la_cola'] = puede_quitar_de_la_cola
+
+
 def empresa_matches(empresa: object, clave: str) -> bool:
     # users.json guarda la empresa con su nombre corto (ALCO, DASEOS...) y los
     # movimientos traen la razón social completa de Empresas.xlsx ("ALCO
@@ -354,6 +364,38 @@ def change_password():
         'change_password.html', role=session.get('role'), display_name=get_display_name(),
         message=message, error=error,
     )
+
+
+@app.route('/upload/quitar', methods=['POST'])
+@login_required(role=['admin', 'uploader', 'finanzas'])
+def quitar_de_la_cola():
+    """Saca un archivo de la carpeta de subidas sin unificarlo.
+
+    Hace falta para lo que no es un extracto (un maestro subido por error) o
+    para lo que no se puede leer: sin esto queda en la cola para siempre,
+    porque /unify solo borra los archivos que aportaron movimientos.
+    """
+    if not puede_quitar_de_la_cola():
+        return render_template('no_access.html', role=', '.join(session_roles())), 403
+    nombre = request.form.get('archivo', '')
+    # El nombre que llega del formulario nunca se usa para armar una ruta: se
+    # busca la coincidencia dentro de la cola real, así no hay forma de
+    # apuntar a un archivo fuera de la carpeta de subidas.
+    objetivo = next((p for p in pending_statement_files(UPLOAD_DIR) if p.name == nombre), None)
+    message = error = None
+    if objetivo is None:
+        error = f'No se encontró «{nombre}» en la cola.'
+    else:
+        try:
+            objetivo.unlink()
+            message = f'Se quitó «{nombre}» de la cola. No se unificó nada.'
+            db.log_action(session.get('username'), 'upload_delete',
+                          detail={'archivo': nombre}, db_path=DB_PATH)
+        except OSError as exc:
+            error = f'No se pudo quitar «{nombre}»: {exc}'
+    return render_template('upload.html', role=session.get('role'), display_name=get_display_name(),
+                            message=message, error=error,
+                            pendientes=[p.name for p in pending_statement_files(UPLOAD_DIR)])
 
 
 @app.route('/upload', methods=['GET', 'POST'])

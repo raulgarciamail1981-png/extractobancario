@@ -365,6 +365,16 @@ table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 /* El texto de /unify llega con saltos de línea reales. */
 .alert--block { white-space: pre-line; }
 
+/* Cola de archivos por unificar: nombre a la izquierda, "Quitar" a la derecha. */
+.cola { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
+.cola li {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.8rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.4rem 0.4rem 0.4rem 0.8rem;
+}
+.cola__nombre { word-break: break-all; font-size: 0.9rem; }
+.cola form { margin: 0; flex-shrink: 0; }
+
 .empty { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
 .empty__icon { font-size: 2.6rem; opacity: 0.6; }
 

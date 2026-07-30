@@ -40,8 +40,20 @@
       <div class="alert alert--notice" style="display: block;">
         <strong>{{ pendientes | length }} archivo(s) en cola.</strong>
         Al unificar se procesan <em>todos</em> estos, no solo los que acabás de subir:
-        <ul style="margin: 0.5rem 0 0 1.2rem;">
-          {% for nombre in pendientes %}<li>{{ nombre }}</li>{% endfor %}
+        <ul class="cola" style="margin: 0.6rem 0 0;">
+          {% for nombre in pendientes %}
+            <li>
+              <span class="cola__nombre">{{ nombre }}</span>
+              {% if puede_quitar_de_la_cola() %}
+                <form method="post" action="/upload/quitar"
+                      onsubmit="return confirm('¿Quitar «{{ nombre }}» de la cola? No se unifica nada, solo se saca el archivo.');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="archivo" value="{{ nombre }}">
+                  <button type="submit" class="btn btn--ghost btn--sm" title="Quitar de la cola sin unificar">Quitar</button>
+                </form>
+              {% endif %}
+            </li>
+          {% endfor %}
         </ul>
       </div>
     {% else %}
