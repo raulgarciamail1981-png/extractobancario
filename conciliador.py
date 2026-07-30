@@ -381,12 +381,41 @@ def extract_account_from_filename(file_name: str) -> str:
     return ''
 
 
+TEXT_WHITESPACE_BYTES = (9, 10, 11, 12, 13)
+
+
 def is_text_file(path: Path) -> bool:
+    """¿El archivo es texto plano, más allá de que se llame .xls?
+
+    Santander exporta sus movimientos como texto con extensión .xls. La
+    detección mira solo si arranca con la firma de un Excel real (OLE o ZIP) y
+    si el principio tiene bytes de control.
+
+    No se exige ASCII puro: el archivo de Santander empieza con "Últimos
+    Movimientos" y esa "Ú" (0xDA en cp1252) hacía que se lo tomara por binario,
+    con lo cual el extracto entero se descartaba sin poder leerlo.
+    """
     raw = path.read_bytes()
     if raw.startswith(b'\xd0\xcf\x11\xe0') or raw.startswith(b'PK'):
         return False
-    raw = raw[:16]
-    return all(b in b'\t\n\r\f\v' or 32 <= b <= 126 for b in raw)
+    return all(b in TEXT_WHITESPACE_BYTES or b >= 32 for b in raw[:512])
+
+
+# Los bancos exportan en la codificación de Windows en español; algunos
+# archivos vienen en UTF-8. Se prueba UTF-8 primero (más específico: un texto
+# cp1252 con acentos casi nunca decodifica como UTF-8 válido) y se cae a
+# cp1252, en vez de fallar y descartar el extracto.
+TEXT_ENCODINGS = ('utf-8-sig', 'cp1252')
+
+
+def read_text_guessing_encoding(path: Path) -> tuple[str, str]:
+    """Devuelve (contenido, codificación usada)."""
+    for encoding in TEXT_ENCODINGS:
+        try:
+            return path.read_text(encoding=encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    return path.read_text(encoding='cp1252', errors='replace'), 'cp1252'
 
 
 def _deduplicate_columns(columns: List[str]) -> List[str]:
@@ -444,7 +473,7 @@ def _parse_delimited_text_section(section_lines: List[str], account: str) -> Opt
 
 
 def read_text_statement(path: Path) -> pd.DataFrame:
-    text = path.read_text(encoding='cp1252', errors='replace')
+    text, _ = read_text_guessing_encoding(path)
     lines = [line.rstrip() for line in text.splitlines() if line.strip()]
     account = ''
     for line in lines[:20]:
@@ -539,7 +568,11 @@ def read_excel_file(path: Path, return_raw: bool = False) -> pd.DataFrame | tupl
 
 
 def read_csv_file(path: Path, return_raw: bool = False) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
-    text = path.read_text(encoding='utf-8', errors='replace').splitlines()
+    # La codificación se detecta una vez y se reusa para pandas: leer siempre
+    # en UTF-8 estricto hacía fallar el archivo entero por un solo carácter
+    # (ej. el "°" de "N° de Comprobante" en los reportes de Banco Municipal).
+    contenido, encoding = read_text_guessing_encoding(path)
+    text = contenido.splitlines()
     separator = detect_csv_separator(text)
     header_row = None
     for idx, line in enumerate(text[:20]):
@@ -550,7 +583,7 @@ def read_csv_file(path: Path, return_raw: bool = False) -> pd.DataFrame | tuple[
             header_row = idx
             break
     header = header_row if header_row is not None else 0
-    df = pd.read_csv(path, sep=separator, header=header, dtype=str, engine='python', encoding='utf-8', skip_blank_lines=True)
+    df = pd.read_csv(path, sep=separator, header=header, dtype=str, engine='python', encoding=encoding, skip_blank_lines=True)
     df.columns = _deduplicate_columns([normalize_header(col) for col in df.columns])
     if return_raw:
         return df, pd.DataFrame({0: text})
@@ -960,29 +993,49 @@ def merge_existing_ci(master: pd.DataFrame, existing: pd.DataFrame) -> pd.DataFr
     return master
 
 
-def gather_statements(source_dir: Path, company_map: Dict[str, str], company_name_map: Dict[str, str], bank_accounts: list[dict[str, str]] | None = None) -> pd.DataFrame:
+def pending_statement_files(source_dir: Path) -> List[Path]:
+    """Archivos que /unify va a procesar si se lo ejecuta ahora.
+
+    Sirve para mostrarlos antes de unificar: la carpeta puede tener restos de
+    subidas anteriores (propias o de otra persona), y unificar los procesa
+    todos, no solo los recién subidos.
+    """
+    if not source_dir.exists():
+        return []
+    return [p for p in sorted(source_dir.iterdir())
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS and p.name != MASTER_FILE.name]
+
+
+def gather_statements(source_dir: Path, company_map: Dict[str, str], company_name_map: Dict[str, str],
+                       bank_accounts: list[dict[str, str]] | None = None,
+                       errores: List[tuple] | None = None) -> pd.DataFrame:
     rows = []
-    for path in sorted(source_dir.iterdir()):
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS and path.name != MASTER_FILE.name:
-            try:
-                if path.suffix.lower() == '.csv':
-                    df, raw_df = read_csv_file(path, return_raw=True)
-                else:
-                    df, raw_df = read_excel_file(path, return_raw=True)
-            except Exception as exc:
-                print(f'Warning: no se pudo leer {path.name}: {exc}')
+    for path in pending_statement_files(source_dir):
+        try:
+            if path.suffix.lower() == '.csv':
+                df, raw_df = read_csv_file(path, return_raw=True)
+            else:
+                df, raw_df = read_excel_file(path, return_raw=True)
+        except Exception as exc:
+            # Además de avisar por consola se acumula el error, para poder
+            # mostrarle al usuario qué archivo quedó sin procesar: antes
+            # se descartaba en silencio y el archivo quedaba en la carpeta
+            # reintentándose en cada unificación.
+            print(f'Warning: no se pudo leer {path.name}: {exc}')
+            if errores is not None:
+                errores.append((path.name, str(exc)))
+            continue
+        bank = guess_bank(path.name)
+        file_cuit = extract_file_cuit(df, raw_df)
+        statement_account = extract_statement_account(raw_df) or extract_account_from_filename(path.name)
+        metadata = {'source_file': path.name, 'bank': bank, 'file_cuit': file_cuit, 'statement_account': statement_account}
+        for idx, row in df.iterrows():
+            metadata['source_row'] = idx + 1
+            record = build_record(row, metadata, company_map, company_name_map, bank_accounts)
+            if is_empty_record(record):
                 continue
-            bank = guess_bank(path.name)
-            file_cuit = extract_file_cuit(df, raw_df)
-            statement_account = extract_statement_account(raw_df) or extract_account_from_filename(path.name)
-            metadata = {'source_file': path.name, 'bank': bank, 'file_cuit': file_cuit, 'statement_account': statement_account}
-            for idx, row in df.iterrows():
-                metadata['source_row'] = idx + 1
-                record = build_record(row, metadata, company_map, company_name_map, bank_accounts)
-                if is_empty_record(record):
-                    continue
-                record['RecordHash'] = hash_record(record)
-                rows.append(record)
+            record['RecordHash'] = hash_record(record)
+            rows.append(record)
     if not rows:
         return pd.DataFrame()
     df = pd.DataFrame(rows)

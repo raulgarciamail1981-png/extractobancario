@@ -323,6 +323,9 @@ table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
   box-shadow: var(--shadow-sm);
 }
 .ci-summary-card.ci-summary-total { border-color: var(--green); background: var(--green-softer); }
+/* Movimientos que no se pudieron atribuir a ninguna empresa del maestro. */
+.ci-summary-card--sin-asignar { border-color: #f7c5c5; background: var(--danger-soft); }
+.ci-summary-card--sin-asignar .ci-summary-name { color: var(--danger-strong); }
 .ci-summary-name {
   font-weight: 700; font-size: 0.75rem; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--text-soft); margin-bottom: 0.15rem;

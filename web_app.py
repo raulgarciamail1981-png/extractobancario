@@ -22,7 +22,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import db
 from conciliador import (BANK_ACCOUNTS_FILE, EMPRESAS_FILE, LOGO_FILE, MASTER_FILE, build_master_bytes,
                           gather_statements, hash_record, load_bank_accounts, load_companies,
-                          account_matches, normalize_cuit, normalize_text)
+                          account_matches, normalize_cuit, normalize_text,
+                          pending_statement_files)
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / 'uploads'
@@ -182,6 +183,27 @@ def empresa_matches(empresa: object, clave: str) -> bool:
     # de redacción en el maestro no rompa las asignaciones.
     clave_norm = normalize_text(clave)
     return bool(clave_norm) and clave_norm in normalize_text(str(empresa or ''))
+
+
+# Valor especial del filtro de Empresa para ver los movimientos que no se
+# pudieron atribuir a ninguna empresa de Empresas.xlsx.
+SIN_EMPRESA_FILTRO = '__sin_empresa__'
+SIN_EMPRESA_LABEL = 'SIN EMPRESA ASIGNADA'
+app.jinja_env.globals['SIN_EMPRESA_FILTRO'] = SIN_EMPRESA_FILTRO
+app.jinja_env.globals['SIN_EMPRESA_LABEL'] = SIN_EMPRESA_LABEL
+
+
+def empresas_del_maestro() -> set[str]:
+    company_map, _ = load_companies(EMPRESAS_PATH)
+    return {str(name) for name in company_map.values() if str(name).strip()}
+
+
+def company_key(empresa: object) -> str:
+    # Clave para decidir si dos razones sociales son la misma empresa.
+    # normalize_text convierte los puntos en espacios, así que "ALCO ROSARIO
+    # S.A." queda como "alco rosario s a" y no coincide con "alco rosario sa".
+    # Sacando todo lo que no sea alfanumérico, ambas dan "alcorosariosa".
+    return re.sub(r'[^a-z0-9]', '', normalize_text(str(empresa or '')))
 
 
 def empresas_primarias_de(user: dict) -> list[str]:
@@ -360,7 +382,11 @@ def upload():
                     db.log_action(session.get('username'), 'upload', detail={'archivos': saved_files}, db_path=DB_PATH)
                 else:
                     error = 'No se pudo guardar ningún archivo.'
-    return render_template('upload.html', role=session.get('role'), display_name=get_display_name(), message=message, error=error)
+    # Se listan los archivos en cola: /unify procesa TODA la carpeta, no solo
+    # lo recién subido, así que conviene ver qué quedó de antes.
+    pendientes = [p.name for p in pending_statement_files(UPLOAD_DIR)]
+    return render_template('upload.html', role=session.get('role'), display_name=get_display_name(),
+                            message=message, error=error, pendientes=pendientes)
 
 
 def get_missing_company_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -472,7 +498,9 @@ def unify():
     if not company_map and EMPRESAS_PATH.exists():
         return render_template('result.html', error='No se pudo abrir Empresas.xlsx. Cerrá el archivo si está abierto y volvé a intentarlo.', role=session.get('role'))
     bank_accounts, bank_company_options, bank_options = load_bank_accounts(BASE_DIR / BANK_ACCOUNTS_FILE.name)
-    statements = gather_statements(UPLOAD_DIR, company_map, company_name_map, bank_accounts)
+    errores_lectura: list[tuple] = []
+    statements = gather_statements(UPLOAD_DIR, company_map, company_name_map, bank_accounts,
+                                    errores=errores_lectura)
     if request.form.get('resolve_missing') == '1':
         combined_company_map = merge_company_lookup(company_map, bank_company_options)
         assigned_hashes = []
@@ -549,6 +577,18 @@ def unify():
         nuevas_line = f'Nuevas agregadas: {new_count} ({existing_count} ya existían y no se duplicaron).'
     lines.append(nuevas_line)
     lines.append('Los archivos procesados se quitaron de la carpeta de subidas.')
+    # Lo que sobró en la carpeta no aportó ningún movimiento: o falló al
+    # leerse, o se leyó pero no tenía filas reconocibles. Se informa porque si
+    # no, queda ahí reintentándose en cada unificación sin que nadie se entere.
+    motivos = dict(errores_lectura)
+    quedaron = [p.name for p in pending_statement_files(UPLOAD_DIR)]
+    if quedaron:
+        lines.append('')
+        lines.append(f'Atención: {len(quedaron)} archivo(s) no aportaron movimientos y siguen '
+                     'en la carpeta de subidas:')
+        for nombre in quedaron:
+            motivo = motivos.get(nombre, 'no se reconoció ninguna fila de movimientos')
+            lines.append(f'  · {nombre}: {motivo[:90]}')
     message = '\n'.join(lines)
     return render_template('result.html', message=message, role=session.get('role'))
 
@@ -624,8 +664,15 @@ def apply_record_filters(df: pd.DataFrame, empresa: str, banco: str, fecha: str,
     # 'Fecha' siempre viene en formato ISO (AAAA-MM-DD) desde la base; ver
     # nota en parse_date_filter sobre por qué "dayfirst" no corresponde acá.
     df['Fecha_dt'] = pd.to_datetime(df['Fecha'], format='%Y-%m-%d', errors='coerce')
-    if empresa:
-        df = df[df['Empresa'].astype(str) == empresa]
+    if empresa == SIN_EMPRESA_FILTRO:
+        conocidas = {company_key(nombre) for nombre in empresas_del_maestro()}
+        df = df[~df['Empresa'].map(company_key).isin(conocidas)]
+    elif empresa:
+        # Por nombre normalizado, igual que los recuadros del resumen: si acá
+        # se comparara el texto exacto, hacer clic en un recuadro que dice 14
+        # podía devolver 0 filas, porque los movimientos traen la razón social
+        # escrita distinto ("ALCO ROSARIO S.A." vs "ALCO ROSARIO SA").
+        df = df[df['Empresa'].map(company_key) == company_key(empresa)]
     if banco:
         df = df[df['Banco'].astype(str) == banco]
     if moneda:
@@ -750,18 +797,42 @@ def build_ci_summary(df_full: pd.DataFrame, filters: dict) -> tuple[dict, list[d
 
     # Los recuadros son fijos (todas las empresas de Empresas.xlsx), aunque
     # una empresa todavía no tenga movimientos o no tenga pendientes de CI.
-    company_map, _ = load_companies(EMPRESAS_PATH)
-    known_companies = {name for name in company_map.values() if name.strip()}
+    known_companies = empresas_del_maestro()
     if not known_companies:
         known_companies = {value for value in df_full['Empresa'].astype(str) if value.strip()}
 
+    # El nombre que trae el movimiento no siempre se escribe igual que en el
+    # maestro ("ALCO ROSARIO S.A." vs "ALCO ROSARIO SA"), según haya salido del
+    # cruce por cuenta o de Empresas.xlsx. Se agrupa por nombre normalizado
+    # para que las dos variantes caigan en el mismo recuadro; con comparación
+    # exacta, esas filas se contaban en el TOTAL pero en ningún recuadro y los
+    # números no cerraban.
+    canonico_por_nombre = {company_key(name): name for name in known_companies}
+    empresa_canonica = base_df['Empresa'].map(
+        lambda value: canonico_por_nombre.get(company_key(value), '')
+    )
+
     company_summaries = []
     for empresa in sorted(known_companies):
-        sub = base_df[base_df['Empresa'].astype(str) == empresa]
+        sub = base_df[empresa_canonica == empresa]
         sin_ci, vencido = counts_for(sub)
         company_summaries.append({
             'name': empresa, 'sin_ci': sin_ci, 'sin_ci_href': make_href(empresa, False),
             'vencido': vencido, 'vencido_href': make_href(empresa, True),
+        })
+
+    # Lo que no se pudo atribuir a ninguna empresa del maestro (empresa vacía
+    # porque no se resolvió, o una razón social que no está en Empresas.xlsx)
+    # va a su propio recuadro. Así la suma de los recuadros siempre da el
+    # TOTAL, y esas filas quedan a la vista en vez de desaparecer.
+    sin_asignar = base_df[empresa_canonica == '']
+    sin_ci, vencido = counts_for(sin_asignar)
+    if sin_ci or vencido:
+        company_summaries.append({
+            'name': SIN_EMPRESA_LABEL, 'sin_ci': sin_ci,
+            'sin_ci_href': make_href(SIN_EMPRESA_FILTRO, False),
+            'vencido': vencido, 'vencido_href': make_href(SIN_EMPRESA_FILTRO, True),
+            'sin_asignar': True,
         })
     return total_summary, company_summaries
 

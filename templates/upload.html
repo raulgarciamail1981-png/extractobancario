@@ -30,12 +30,23 @@
       </div>
       <input id="statement-input" type="file" name="statement" accept=".csv,.xls,.xlsx" multiple hidden>
       <p id="fileLabel" class="field__hint">No hay archivos seleccionados.</p>
-      <button type="submit" class="btn btn--primary">Subir archivos</button>
+      <button type="submit" id="submitButton" class="btn btn--primary">Subir archivos</button>
     </form>
   </div>
 
   <div class="card">
     <div class="card__title">Unificar extractos</div>
+    {% if pendientes %}
+      <div class="alert alert--notice" style="display: block;">
+        <strong>{{ pendientes | length }} archivo(s) en cola.</strong>
+        Al unificar se procesan <em>todos</em> estos, no solo los que acabás de subir:
+        <ul style="margin: 0.5rem 0 0 1.2rem;">
+          {% for nombre in pendientes %}<li>{{ nombre }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% else %}
+      <p class="card__hint">No hay archivos en cola para unificar.</p>
+    {% endif %}
     <p class="card__hint">
       Los archivos subidos quedan en la carpeta de uploads. Al unificar, los movimientos se
       incorporan a la base y aparecen en el Resumen. El CI ya cargado se conserva automáticamente.
@@ -53,12 +64,24 @@
   const fileInput = document.getElementById('statement-input');
   const fileLabel = document.getElementById('fileLabel');
 
+  const submitButton = document.getElementById('submitButton');
+
+  // Elegir los archivos no los sube: hasta apretar "Subir archivos" siguen
+  // solo en la máquina del usuario. Antes se listaban los nombres a secas y
+  // parecía que ya estaban cargados, mientras la cola seguía vacía.
   function updateLabel(files) {
     if (!files || files.length === 0) {
+      fileLabel.className = 'field__hint';
       fileLabel.textContent = 'No hay archivos seleccionados.';
+      submitButton.textContent = 'Subir archivos';
       return;
     }
-    fileLabel.textContent = Array.from(files).map(file => file.name).join(', ');
+    const nombres = Array.from(files).map(file => file.name).join(', ');
+    fileLabel.className = 'alert alert--notice';
+    fileLabel.style.display = 'block';
+    fileLabel.innerHTML = '<strong>' + files.length + ' archivo(s) elegidos, todavía sin subir.</strong>'
+      + ' Apretá «Subir archivos» para enviarlos:<br>' + nombres;
+    submitButton.textContent = 'Subir ' + files.length + ' archivo(s)';
   }
 
   dropArea.addEventListener('click', () => fileInput.click());

@@ -39,6 +39,7 @@
         <label for="filterEmpresa">Empresa</label>
         <select id="filterEmpresa" name="empresa">
           <option value="">Todas</option>
+          <option value="{{ SIN_EMPRESA_FILTRO }}" {% if filters.empresa == SIN_EMPRESA_FILTRO %}selected{% endif %}>— {{ SIN_EMPRESA_LABEL }} —</option>
           {% for option in empresa_options %}
             <option value="{{ option }}" {% if filters.empresa == option %}selected{% endif %}>{{ option }}</option>
           {% endfor %}
@@ -114,7 +115,7 @@
       </a>
     </div>
     {% for empresa in company_summaries %}
-      <div class="ci-summary-card">
+      <div class="ci-summary-card{% if empresa.sin_asignar %} ci-summary-card--sin-asignar{% endif %}">
         <div class="ci-summary-name">{{ empresa.name }}</div>
         <a class="ci-summary-line" href="{{ empresa.sin_ci_href }}">
           <strong>{{ empresa.sin_ci }}</strong> acreditaciones sin CI
