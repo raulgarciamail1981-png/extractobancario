@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
 from conciliador import (account_matches, canonicalize_bank_name, canonicalize_currency,
                           extract_cuit_from_text, hash_record, is_valid_cuit,
@@ -172,3 +173,22 @@ def test_hash_record_still_differs_for_genuinely_different_description():
     base = {'Banco': 'Galicia', 'Cuenta': '123', 'Fecha': '15/07/2026', 'Monto': '100', 'Descripcion': 'Pago proveedor', 'Saldo': '900', 'CUIT': '20123456789'}
     other = dict(base, Descripcion='Cobro cliente')
     assert hash_record(base) != hash_record(other)
+
+
+@pytest.mark.parametrize('texto, esperado', [
+    # Macro exporta la fecha como ISO con hora. Con dayfirst=True, pandas la da
+    # vuelta cuando dia y mes son <= 12: el 3 de agosto se guardaba como 8 de
+    # marzo, y en silencio, porque las fechas con dia > 12 salian bien.
+    ('2026-08-03 00:00:00', (2026, 8, 3)),
+    ('2026-12-11 00:00:00', (2026, 12, 11)),
+    ('2026-08-25 00:00:00', (2026, 8, 25)),
+    ('2026-08-03T14:43:13', (2026, 8, 3)),
+    # Los extractos de texto siguen siendo dia primero.
+    ('03/08/2026', (2026, 8, 3)),
+    ('03/08/2026 14:43:13', (2026, 8, 3)),
+    ('25/12/2026', (2026, 12, 25)),
+])
+def test_la_fecha_iso_no_se_lee_con_el_dia_primero(texto, esperado):
+    fecha = parse_date(texto)
+
+    assert (fecha.year, fecha.month, fecha.day) == esperado

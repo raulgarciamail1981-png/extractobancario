@@ -258,13 +258,20 @@ def parse_date(value: object) -> Optional[datetime]:
     text = str(value).strip()
     if text == '':
         return None
-    for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%d/%m/%y', '%Y/%m/%d'):
+    for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%d/%m/%y', '%Y/%m/%d',
+                '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M',
+                '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S'):
         try:
             return datetime.strptime(text, fmt)
         except ValueError:
             continue
     try:
-        parsed = pd.to_datetime(text, dayfirst=True, errors='coerce')
+        # Un texto que arranca en AAAA-MM-DD es ISO y el día nunca va primero:
+        # con dayfirst=True, pandas da vuelta "2026-08-03 00:00:00" y lo lee
+        # como 8 de marzo. Macro exporta la fecha así, y el error es silencioso
+        # porque solo se nota cuando día y mes son <= 12.
+        dayfirst = not re.match(r'\d{4}-\d{2}-\d{2}', text)
+        parsed = pd.to_datetime(text, dayfirst=dayfirst, errors='coerce')
         if pd.isna(parsed):
             return None
         return parsed.to_pydatetime()
