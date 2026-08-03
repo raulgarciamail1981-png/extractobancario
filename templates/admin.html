@@ -43,7 +43,7 @@
              select simple, editarlas desde acá les borraba el segundo rol. #}
           <select name="roles" id="fieldRole" multiple size="5" required style="height: auto;">
             {% for option in user_options %}
-              <option value="{{ option }}">{{ option }}</option>
+              <option value="{{ option }}">{{ option | role_label }}</option>
             {% endfor %}
           </select>
           <p class="field__hint">Ctrl+clic para elegir más de uno.</p>
@@ -91,7 +91,7 @@
               <td data-label="Usuario">{{ user.username }}</td>
               <td data-label="Nombre y Apellido">{{ user.nombre or '—' }}</td>
               <td data-label="Roles">
-                {% for r in user_roles(user) %}<span class="badge badge--success">{{ r }}</span> {% endfor %}
+                {% for r in user_roles(user) %}<span class="badge badge--success">{{ r | role_label }}</span> {% endfor %}
               </td>
               <td>
                 <button type="button" class="btn btn--ghost btn--sm edit-user-button"

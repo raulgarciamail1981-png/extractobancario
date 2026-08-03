@@ -4,7 +4,8 @@
     "El usuario de ejemplo es admin / cambiame123: cambiale la contraseña apenas entres,",
     "o mejor, generá el hash vos con:",
     "  python -c \"from werkzeug.security import generate_password_hash as g; print(g('TU-CLAVE'))\"",
-    "Roles válidos: admin, uploader, viewer, cajera, finanzas.",
+    "Roles válidos: admin, uploader, viewer, comercial, cajera, finanzas.",
+    "'comercial' es el asistente comercial: ve el Resumen igual que 'viewer', sin cargar ni editar.",
     "users.json NO se sube al repositorio (tiene credenciales reales)."
   ],
   "users": [

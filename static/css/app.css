@@ -365,6 +365,22 @@ table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 /* El texto de /unify llega con saltos de línea reales. */
 .alert--block { white-space: pre-line; }
 
+/* Avisos persistentes (extractos nuevos / CI asignado). A diferencia de
+   .alert--notice, que lo prende el JS mientras la pantalla está abierta, este
+   se ve apenas entra la persona y queda hasta que aprieta "Entendido". */
+.aviso {
+  display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
+  margin-bottom: 1rem; padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm); border-left: 4px solid var(--green);
+  background: var(--green-soft); color: var(--green-dark);
+  box-shadow: var(--shadow-sm);
+}
+.aviso--ci { border-left-color: var(--warning); background: var(--warning-soft); color: var(--warning-strong); }
+.aviso__icono { font-size: 1.2rem; line-height: 1; }
+.aviso__texto { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 12rem; }
+.aviso__detalle { font-size: 0.85rem; opacity: 0.85; }
+.aviso__form { margin: 0; }
+
 /* Cola de archivos por unificar: nombre a la izquierda, "Quitar" a la derecha. */
 .cola { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; }
 .cola li {

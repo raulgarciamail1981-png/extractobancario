@@ -33,7 +33,7 @@
               </nav>
               <span class="userchip">
                 {{ session.get('nombre') or session.get('username') }}
-                <span class="userchip__role">{{ session.get('roles') | join(' · ') if session.get('roles') else role }}</span>
+                <span class="userchip__role">{{ session.get('roles') | map('role_label') | join(' · ') if session.get('roles') else role | role_label }}</span>
               </span>
             </div>
           </div>
@@ -41,6 +41,24 @@
       {% endif %}
 
       <main class="main{% if wide %} main--wide{% endif %}">
+        {# Avisos persistentes: quedan visibles entre sesiones hasta que la
+           persona los marca como vistos. #}
+        {% for aviso in avisos or [] %}
+          <div class="aviso aviso--{{ aviso.tipo }}">
+            <span class="aviso__icono" aria-hidden="true">{{ '🔔' if aviso.tipo == 'ci' else '📄' }}</span>
+            <div class="aviso__texto">
+              <strong>{{ aviso.titulo }}</strong>
+              {% if aviso.detalle %}<span class="aviso__detalle">{{ aviso.detalle }}</span>{% endif %}
+            </div>
+            <form method="post" action="/avisos/visto" class="aviso__form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="tipo" value="{{ aviso.tipo }}">
+              <input type="hidden" name="ts" value="{{ aviso.ts }}">
+              <input type="hidden" name="volver" value="{{ request.full_path if request.path == '/records' else '/records' }}">
+              <button type="submit" class="btn btn--ghost btn--sm">Entendido</button>
+            </form>
+          </div>
+        {% endfor %}
         {% block content %}{% endblock %}
       </main>
     </div>

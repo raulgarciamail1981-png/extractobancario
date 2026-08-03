@@ -1141,3 +1141,38 @@ def test_old_failures_fall_out_of_the_window(client, monkeypatch):
 
     assert client.post('/login', data={'username': 'admin', 'password': 'adminpass'}).status_code == 302
 
+
+
+def _client_como(rol, app_env, monkeypatch):
+    usuarios = [{'username': 'usuaria', 'password': generate_password_hash('clave12345'),
+                 'roles': [rol], 'nombre': 'Usuaria Test'}]
+    monkeypatch.setattr(web_app, 'users_by_name', {u['username']: u for u in usuarios})
+    c = web_app.app.test_client()
+    c.post('/login', data={'username': 'usuaria', 'password': 'clave12345'})
+    return c
+
+
+def test_asistente_comercial_consulta_el_resumen(app_env, monkeypatch):
+    # El asistente comercial es de solo consulta: entra al Resumen y a las
+    # descargas, igual que un viewer.
+    _seed_movement(app_env['db_path'])
+    c = _client_como('comercial', app_env, monkeypatch)
+
+    assert c.get('/records').status_code == 200
+    assert c.get('/download/excel').status_code == 200
+
+
+def test_asistente_comercial_no_carga_ni_administra(app_env, monkeypatch):
+    c = _client_como('comercial', app_env, monkeypatch)
+
+    assert c.get('/upload').status_code == 403
+    assert c.post('/unify', data={}).status_code == 403
+    assert c.get('/admin').status_code == 403
+
+
+def test_el_rol_comercial_se_muestra_como_asistente_comercial(app_env, monkeypatch):
+    c = _client_como('comercial', app_env, monkeypatch)
+
+    body = c.get('/records').get_data(as_text=True)
+
+    assert 'asistente comercial' in body

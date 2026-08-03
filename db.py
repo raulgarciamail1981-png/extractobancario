@@ -46,6 +46,16 @@ audit_log_table = Table(
     Column('record_hash', Text),
 )
 
+# Hasta dónde vio cada persona cada tipo de aviso ("extractos", "ci"). Un
+# aviso se muestra mientras haya movimiento posterior a este ts. Va en tabla
+# aparte y no en el audit_log para no ensuciar la auditoría con clics.
+notificaciones_table = Table(
+    'notificaciones_vistas', metadata,
+    Column('username', Text, primary_key=True),
+    Column('tipo', Text, primary_key=True),
+    Column('ts', Text),
+)
+
 # Cache de engines por URL: create_engine() abre un pool de conexiones, no
 # tiene sentido recrearlo en cada llamada (sobre todo para Postgres).
 _ENGINES: dict[str, Engine] = {}
@@ -76,6 +86,12 @@ def get_engine(db_path: Path = DEFAULT_DB_PATH) -> Engine:
             cursor.execute('PRAGMA busy_timeout=5000')
             cursor.close()
     metadata.create_all(engine)
+    # Los avisos consultan el audit_log por acción y fecha en cada pantalla, y
+    # esa tabla solo crece. Va aparte de create_all() porque para una tabla que
+    # ya existe (el servidor) create_all no agrega los índices que falten.
+    with engine.begin() as conn:
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_audit_log_action_ts '
+                          'ON audit_log ("action", "ts")'))
     _ENGINES[url] = engine
     return engine
 
@@ -334,6 +350,48 @@ def get_last_action_entry(action: str, db_path: Path = DEFAULT_DB_PATH) -> dict 
     if not row:
         return None
     return _audit_row_to_dict(row)
+
+
+def get_notificacion_vista(username: str, tipo: str, db_path: Path = DEFAULT_DB_PATH) -> str:
+    engine = get_engine(db_path)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text('SELECT "ts" FROM notificaciones_vistas WHERE "username" = :username AND "tipo" = :tipo'),
+            {'username': username, 'tipo': tipo},
+        ).first()
+    return row[0] if row and row[0] else ''
+
+
+def marcar_notificacion_vista(username: str, tipo: str, ts: str,
+                               db_path: Path = DEFAULT_DB_PATH) -> None:
+    engine = get_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(
+            text('INSERT INTO notificaciones_vistas ("username", "tipo", "ts") '
+                 'VALUES (:username, :tipo, :ts) '
+                 'ON CONFLICT ("username", "tipo") DO UPDATE SET "ts" = excluded."ts"'),
+            {'username': username, 'tipo': tipo, 'ts': ts},
+        )
+
+
+def ci_asignados_desde(ts: str, db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
+    """Movimientos que quedaron con CI después de `ts`, agrupados por empresa.
+
+    Se cruza el audit_log (cuándo se tocó el CI) con movements (qué empresa es
+    y si el CI sigue puesto): así un CI que después se borró no queda avisando.
+    """
+    engine = get_engine(db_path)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text('SELECT m."Empresa" AS empresa, COUNT(DISTINCT a."record_hash") AS cantidad, '
+                 'MAX(a."ts") AS ultimo '
+                 'FROM audit_log a JOIN movements m ON m."RecordHash" = a."record_hash" '
+                 'WHERE a."action" = :accion AND a."ts" > :ts '
+                 "AND COALESCE(m.\"CI\", '') <> '' "
+                 'GROUP BY m."Empresa"'),
+            {'accion': 'update_ci', 'ts': ts},
+        ).all()
+    return [{'empresa': row[0] or '', 'cantidad': int(row[1] or 0), 'ultimo': row[2] or ''} for row in rows]
 
 
 def migrate_excel_if_needed(excel_path: Path, db_path: Path = DEFAULT_DB_PATH) -> None:

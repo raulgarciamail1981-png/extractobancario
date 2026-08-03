@@ -3,6 +3,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from urllib.parse import urlencode
@@ -34,7 +35,18 @@ USERS_EXAMPLE_FILE = BASE_DIR / 'users.example.json'
 # (dev/tests, cero configuración).
 DB_PATH = os.environ.get('DATABASE_URL') or os.environ.get('CONCILIADOR_DB_PATH', str(BASE_DIR / 'conciliador.db'))
 EMPRESAS_PATH = BASE_DIR / EMPRESAS_FILE.name
-USER_ROLES = ['admin', 'uploader', 'viewer', 'cajera', 'finanzas']
+USER_ROLES = ['admin', 'uploader', 'viewer', 'comercial', 'cajera', 'finanzas']
+# El audit_log guarda todo en UTC. Para mostrar se pasa a hora argentina, que
+# es UTC-3 fija (no hay horario de verano), así no depende de la zona horaria
+# que tenga configurada el contenedor.
+TZ_LOCAL = timezone(timedelta(hours=-3))
+# Tipos de aviso persistente. Cada uno se muestra hasta que la persona lo marca
+# como visto, para que sirva de seguimiento entre una sesión y la siguiente.
+AVISO_EXTRACTOS = 'extractos'
+AVISO_CI = 'ci'
+# El id del rol es el que se guarda en users.json; en pantalla se lee el nombre
+# del puesto. 'comercial' ve lo mismo que 'viewer' (solo consulta del Resumen).
+ROLE_LABELS = {'comercial': 'asistente comercial'}
 
 def _env_flag(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
@@ -161,9 +173,14 @@ def has_role(*names: str) -> bool:
     return bool(set(session_roles()) & set(names))
 
 
+def role_label(role: object) -> str:
+    return ROLE_LABELS.get(str(role).strip().lower(), str(role))
+
+
 # Disponibles en los templates para no repetir la lógica de roles en el HTML.
 app.jinja_env.globals['has_role'] = has_role
 app.jinja_env.globals['user_roles'] = get_user_roles
+app.jinja_env.filters['role_label'] = role_label
 
 
 def puede_ver_saldo() -> bool:
@@ -228,6 +245,102 @@ def es_empresa_primaria(empresa: object, user: dict) -> bool:
     if not primarias:
         return True
     return any(empresa_matches(empresa, clave) for clave in primarias)
+
+
+def formato_fecha_hora(ts: str) -> str:
+    try:
+        return datetime.fromisoformat(ts).astimezone(TZ_LOCAL).strftime('%d/%m/%Y %H:%M')
+    except (TypeError, ValueError):
+        return ''
+
+
+def aviso_extractos_nuevos(username: str) -> dict | None:
+    """Para las cajeras: hubo una unificación que todavía no vieron."""
+    if not has_role('cajera'):
+        return None
+    entry = db.get_last_action_entry('unify', db_path=DB_PATH)
+    if not entry:
+        return None
+    visto = db.get_notificacion_vista(username, AVISO_EXTRACTOS, db_path=DB_PATH)
+    if not visto:
+        # Primera vez que entra: lo que ya estaba cargado no es novedad. Se
+        # deja la marca puesta y se avisa recién de la próxima unificación.
+        db.marcar_notificacion_vista(username, AVISO_EXTRACTOS, entry['ts'], db_path=DB_PATH)
+        return None
+    if entry['ts'] <= visto:
+        return None
+    if entry.get('username') == username:
+        # Las que son cajera y finanzas a la vez unifican ellas mismas: no
+        # tiene sentido avisarles de lo que acaban de hacer.
+        db.marcar_notificacion_vista(username, AVISO_EXTRACTOS, entry['ts'], db_path=DB_PATH)
+        return None
+    detalle = entry.get('detail') or {}
+    nuevas = detalle.get('nuevas') if isinstance(detalle, dict) else None
+    partes = []
+    if nuevas:
+        partes.append(f'{nuevas} movimiento(s) nuevo(s)')
+    cuando = formato_fecha_hora(entry['ts'])
+    if cuando:
+        partes.append(cuando)
+    return {
+        'tipo': AVISO_EXTRACTOS,
+        'ts': entry['ts'],
+        'titulo': 'Hay nuevos extractos cargados',
+        'detalle': ' · '.join(partes),
+    }
+
+
+def aviso_ci_asignados(username: str) -> dict | None:
+    """Para los asistentes comerciales: CI cargados en sus empresas."""
+    if not has_role('comercial'):
+        return None
+    ahora = datetime.now(timezone.utc).isoformat()
+    visto = db.get_notificacion_vista(username, AVISO_CI, db_path=DB_PATH)
+    if not visto:
+        db.marcar_notificacion_vista(username, AVISO_CI, ahora, db_path=DB_PATH)
+        return None
+    user = current_user()
+    propios = [fila for fila in db.ci_asignados_desde(visto, db_path=DB_PATH)
+               if es_empresa_primaria(fila['empresa'], user)]
+    total = sum(fila['cantidad'] for fila in propios)
+    if not total:
+        return None
+    empresas = sorted({fila['empresa'] for fila in propios if fila['empresa']})
+    return {
+        'tipo': AVISO_CI,
+        # Se marca hasta el último CI contado, no hasta "ahora": si alguien
+        # carga uno mientras esta pantalla está abierta, no se pierde el aviso.
+        'ts': max(fila['ultimo'] for fila in propios),
+        'titulo': f'{total} movimiento(s) con CI asignado',
+        'detalle': ', '.join(empresas),
+    }
+
+
+@app.context_processor
+def inyectar_avisos() -> dict:
+    # Van por context processor y se pintan en base.html: así el aviso aparece
+    # en cualquier pantalla, no solo si la persona pasa por el Resumen.
+    username = session.get('username')
+    if not username:
+        return {'avisos': []}
+    avisos = [aviso_extractos_nuevos(username), aviso_ci_asignados(username)]
+    return {'avisos': [aviso for aviso in avisos if aviso]}
+
+
+@app.route('/avisos/visto', methods=['POST'])
+def marcar_aviso_visto():
+    if not session.get('username'):
+        return redirect(url_for('login'))
+    tipo = request.form.get('tipo', '')
+    ts = request.form.get('ts', '')
+    if tipo in (AVISO_EXTRACTOS, AVISO_CI) and ts:
+        db.marcar_notificacion_vista(session['username'], tipo, ts, db_path=DB_PATH)
+    # El destino viene de un formulario: solo se acepta volver al Resumen para
+    # que no sirva de redirección abierta a otro sitio.
+    destino = request.form.get('volver', '/records')
+    if not destino.startswith('/records'):
+        destino = '/records'
+    return redirect(destino)
 
 
 def guardar_ci(changes: list[tuple[str, str]], old_ci_map: dict) -> None:
@@ -885,7 +998,7 @@ def get_latest_unify_ts() -> str:
 
 
 @app.route('/api/latest-unify')
-@login_required(role=['admin', 'uploader', 'viewer', 'cajera', 'finanzas'])
+@login_required(role=['admin', 'uploader', 'viewer', 'comercial', 'cajera', 'finanzas'])
 def api_latest_unify():
     entry = db.get_last_action_entry('unify', db_path=DB_PATH)
     if not entry:
@@ -894,7 +1007,7 @@ def api_latest_unify():
 
 
 @app.route('/records', methods=['GET', 'POST'])
-@login_required(role=['admin', 'uploader', 'viewer', 'cajera', 'finanzas'])
+@login_required(role=['admin', 'uploader', 'viewer', 'comercial', 'cajera', 'finanzas'])
 def records():
     error = None
     message = None
@@ -1137,7 +1250,7 @@ def build_pdf_export(rows: list[dict], columns: list[str], filter_summary: str) 
 
 
 @app.route('/download/excel')
-@login_required(role=['admin', 'uploader', 'viewer', 'cajera', 'finanzas'])
+@login_required(role=['admin', 'uploader', 'viewer', 'comercial', 'cajera', 'finanzas'])
 def download_excel():
     filters = get_filters_from_args()
     df = load_filtered_export_dataframe(filters)
@@ -1157,7 +1270,7 @@ def download_excel():
 
 
 @app.route('/download/pdf')
-@login_required(role=['admin', 'uploader', 'viewer', 'cajera', 'finanzas'])
+@login_required(role=['admin', 'uploader', 'viewer', 'comercial', 'cajera', 'finanzas'])
 def download_pdf():
     filters = get_filters_from_args()
     df = load_filtered_export_dataframe(filters)
