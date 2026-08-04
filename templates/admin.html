@@ -109,6 +109,58 @@
 
   {% if has_role('admin') %}
     <div class="card">
+      <div class="card__title">Extractos importados</div>
+      <p class="card__hint">
+        Si se subió un extracto equivocado, acá se quitan <strong>solo</strong> los movimientos
+        que trajo ese archivo; el resto queda intacto. Mirá la columna «Con CI» antes de borrar:
+        esos son CI ya cargados que se van a perder y habría que volver a completarlos.
+      </p>
+      {% if archivos %}
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Archivo</th>
+                <th>Empresa(s)</th>
+                <th>Período</th>
+                <th>Movimientos</th>
+                <th>Con CI</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for archivo in archivos %}
+                <tr>
+                  <td data-label="Archivo" class="mono">{{ archivo.archivo or '(sin archivo)' }}</td>
+                  <td data-label="Empresa(s)">{{ archivo.empresas | join(', ') or '—' }}</td>
+                  <td data-label="Período">{{ archivo.desde_display }} → {{ archivo.hasta_display }}</td>
+                  <td data-label="Movimientos">{{ archivo.filas }}</td>
+                  <td data-label="Con CI">
+                    {% if archivo.con_ci %}
+                      <span class="badge badge--warning">{{ archivo.con_ci }}</span>
+                    {% else %}
+                      0
+                    {% endif %}
+                  </td>
+                  <td>
+                    <form method="post" action="/admin/borrar-archivo"
+                          onsubmit="return confirm('Se van a borrar {{ archivo.filas }} movimiento(s) de {{ archivo.archivo }}{% if archivo.con_ci %}, incluidos {{ archivo.con_ci }} con CI ya cargado{% endif %}. Esta acción no se puede deshacer. ¿Confirmás?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="archivo" value="{{ archivo.archivo }}">
+                      <button type="submit" class="btn btn--danger btn--sm">Borrar</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="card__hint">No hay movimientos importados todavía.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
       <div class="card__title">Zona de pruebas</div>
       <p class="card__hint">
         Vacía los movimientos unificados. No borra usuarios ni los archivos subidos en

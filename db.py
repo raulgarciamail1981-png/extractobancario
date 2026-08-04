@@ -295,6 +295,55 @@ def clear_movements(db_path: Path = DEFAULT_DB_PATH) -> int:
         return result.rowcount
 
 
+def resumen_por_archivo(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
+    """Qué aportó cada extracto ya unificado, para poder revisarlo y sacarlo.
+
+    Se agrupa por archivo y empresa y se junta en Python: `string_agg` y
+    `COUNT(...) FILTER` no están en todos los motores, y esto corre igual
+    sobre SQLite (tests) que sobre Postgres (servidor).
+    """
+    engine = get_engine(db_path)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text('SELECT "SourceFile", "Empresa", COUNT(*) AS filas, '
+                 'MIN("Fecha") AS desde, MAX("Fecha") AS hasta, '
+                 "SUM(CASE WHEN COALESCE(\"CI\", '') <> '' THEN 1 ELSE 0 END) AS con_ci "
+                 'FROM movements GROUP BY "SourceFile", "Empresa"'),
+        ).all()
+    por_archivo: dict[str, dict] = {}
+    for source_file, empresa, filas, desde, hasta, con_ci in rows:
+        nombre = source_file or ''
+        item = por_archivo.setdefault(nombre, {
+            'archivo': nombre, 'filas': 0, 'desde': '', 'hasta': '',
+            'empresas': set(), 'con_ci': 0,
+        })
+        item['filas'] += int(filas or 0)
+        item['con_ci'] += int(con_ci or 0)
+        if empresa:
+            item['empresas'].add(str(empresa))
+        # Las fechas se guardan como AAAA-MM-DD, así que ordenan como texto.
+        if desde and (not item['desde'] or desde < item['desde']):
+            item['desde'] = desde
+        if hasta and (not item['hasta'] or hasta > item['hasta']):
+            item['hasta'] = hasta
+    resultado = []
+    for item in por_archivo.values():
+        item['empresas'] = sorted(item['empresas'])
+        resultado.append(item)
+    resultado.sort(key=lambda item: (item['hasta'], item['archivo']), reverse=True)
+    return resultado
+
+
+def delete_movements_by_source(source_file: str, db_path: Path = DEFAULT_DB_PATH) -> int:
+    engine = get_engine(db_path)
+    with engine.begin() as conn:
+        result = conn.execute(
+            text('DELETE FROM movements WHERE "SourceFile" = :source_file'),
+            {'source_file': source_file},
+        )
+        return result.rowcount
+
+
 def update_ci(record_hash: str, ci_value: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
     engine = get_engine(db_path)
     with engine.begin() as conn:

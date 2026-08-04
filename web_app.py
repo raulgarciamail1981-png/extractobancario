@@ -247,6 +247,14 @@ def es_empresa_primaria(empresa: object, user: dict) -> bool:
     return any(empresa_matches(empresa, clave) for clave in primarias)
 
 
+def formato_fecha(fecha: str) -> str:
+    # Las fechas se guardan como AAAA-MM-DD; en pantalla van dd/mm/aaaa.
+    try:
+        return datetime.strptime(str(fecha), '%Y-%m-%d').strftime('%d/%m/%Y')
+    except (TypeError, ValueError):
+        return str(fecha or '')
+
+
 def formato_fecha_hora(ts: str) -> str:
     try:
         return datetime.fromisoformat(ts).astimezone(TZ_LOCAL).strftime('%d/%m/%Y %H:%M')
@@ -1353,7 +1361,45 @@ def admin():
             error = 'Acción desconocida.'
         users = load_users()
         users_by_name = {user['username']: user for user in users}
-    return render_template('admin.html', role=session.get('role'), users=users, user_options=get_user_options(), message=message, error=error)
+    return render_admin(users=users, message=message, error=error)
+
+
+def render_admin(users: list | None = None, message: str | None = None, error: str | None = None):
+    archivos = db.resumen_por_archivo(db_path=DB_PATH)
+    for archivo in archivos:
+        archivo['desde_display'] = formato_fecha(archivo['desde'])
+        archivo['hasta_display'] = formato_fecha(archivo['hasta'])
+    return render_template(
+        'admin.html', role=session.get('role'),
+        users=users if users is not None else load_users(),
+        user_options=get_user_options(), archivos=archivos,
+        message=message, error=error,
+    )
+
+
+@app.route('/admin/borrar-archivo', methods=['POST'])
+@login_required(role=['admin'])
+def admin_borrar_archivo():
+    # Sacar un extracto mal subido sin vaciar todo: se borra por SourceFile,
+    # que es de dónde vino cada movimiento. Solo admin, porque se lleva puesto
+    # trabajo de otras personas (los CI que ya se hayan cargado en esas filas).
+    archivo = request.form.get('archivo', '').strip()
+    message = None
+    error = None
+    if not archivo:
+        error = 'Hay que indicar de qué archivo borrar los movimientos.'
+    elif archivo not in {item['archivo'] for item in db.resumen_por_archivo(db_path=DB_PATH)}:
+        error = f'No hay movimientos importados de «{archivo}».'
+    else:
+        try:
+            borrados = db.delete_movements_by_source(archivo, db_path=DB_PATH)
+            db.log_action(session.get('username'), 'delete_source_file',
+                          detail={'archivo': archivo, 'movimientos': borrados}, db_path=DB_PATH)
+            message = (f'Se borraron {borrados} movimiento(s) de «{archivo}». '
+                       'El resto de los extractos no se tocó.')
+        except Exception as exc:
+            error = f'Error al borrar los movimientos de «{archivo}»: {exc}'
+    return render_admin(message=message, error=error)
 
 
 @app.route('/admin/clear', methods=['POST'])
@@ -1367,8 +1413,7 @@ def admin_clear():
         message = f'Se borraron {deleted} movimientos unificados (uso de prueba). Usuarios y archivos subidos no se modificaron.'
     except Exception as exc:
         error = f'Error al borrar movimientos: {exc}'
-    users = load_users()
-    return render_template('admin.html', role=session.get('role'), users=users, user_options=get_user_options(), message=message, error=error)
+    return render_admin(message=message, error=error)
 
 
 @app.route('/admin/audit')
