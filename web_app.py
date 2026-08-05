@@ -1014,11 +1014,45 @@ def api_latest_unify():
     return {'ts': entry['ts'], 'username': entry['username'], 'detail': entry.get('detail')}
 
 
+def destino_de_vuelta_a_records() -> str:
+    # El destino viene de un formulario: solo se acepta volver al Resumen, para
+    # que no sirva de redirección abierta a otro sitio.
+    destino = request.form.get('volver', '/records')
+    return destino if destino.startswith('/records') else '/records'
+
+
+@app.route('/records/borrar', methods=['POST'])
+@login_required(role=['admin'])
+def borrar_movimiento():
+    """Borra un movimiento suelto. Solo admin.
+
+    Hace falta para sacar lo que entró mal (ej. un extracto resuelto a mano que
+    quedó duplicado) sin vaciar todo. Queda registrado en la auditoría con el
+    detalle del movimiento, porque una vez borrado no hay forma de reconstruir
+    qué decía. Si el archivo de origen se vuelve a unificar, el movimiento
+    vuelve a entrar: esto borra el registro, no impide que se importe de nuevo.
+    """
+    record_hash = request.form.get('record_hash', '').strip()
+    movimiento = db.get_movement(record_hash, db_path=DB_PATH) if record_hash else None
+    if movimiento is None:
+        session['error_flash'] = 'No se encontró el movimiento que se quiso borrar.'
+    else:
+        db.delete_movement(record_hash, db_path=DB_PATH)
+        db.log_action(session.get('username'), 'delete_movement', detail=movimiento,
+                      record_hash=record_hash, db_path=DB_PATH)
+        session['mensaje_flash'] = (
+            f"Se borró el movimiento del {formato_fecha(movimiento['Fecha'])} "
+            f"de {movimiento['Empresa'] or 'empresa sin asignar'} "
+            f"por {format_amount(movimiento['Monto'])}."
+        )
+    return redirect(destino_de_vuelta_a_records())
+
+
 @app.route('/records', methods=['GET', 'POST'])
 @login_required(role=['admin', 'uploader', 'viewer', 'comercial', 'cajera', 'finanzas'])
 def records():
-    error = None
-    message = None
+    error = session.pop('error_flash', None)
+    message = session.pop('mensaje_flash', None)
     df_full = db.load_movements(db_path=DB_PATH)
     if df_full.empty:
         error = 'No existen movimientos unificados. Primero subí y unificá extractos.'

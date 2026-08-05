@@ -334,6 +334,29 @@ def resumen_por_archivo(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
     return resultado
 
 
+def get_movement(record_hash: str, db_path: Path = DEFAULT_DB_PATH) -> dict | None:
+    engine = get_engine(db_path)
+    columnas = ['Fecha', 'Empresa', 'CUIT', 'Cuenta', 'Banco', 'Descripcion',
+                'Monto', 'Saldo', 'CI', 'SourceFile']
+    seleccion = ', '.join(f'"{col}"' for col in columnas)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(f'SELECT {seleccion} FROM movements WHERE "RecordHash" = :record_hash'),
+            {'record_hash': record_hash},
+        ).first()
+    return dict(zip(columnas, row)) if row else None
+
+
+def delete_movement(record_hash: str, db_path: Path = DEFAULT_DB_PATH) -> int:
+    engine = get_engine(db_path)
+    with engine.begin() as conn:
+        result = conn.execute(
+            text('DELETE FROM movements WHERE "RecordHash" = :record_hash'),
+            {'record_hash': record_hash},
+        )
+        return result.rowcount
+
+
 def delete_movements_by_source(source_file: str, db_path: Path = DEFAULT_DB_PATH) -> int:
     engine = get_engine(db_path)
     with engine.begin() as conn:

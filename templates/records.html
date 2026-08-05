@@ -128,6 +128,16 @@
   </div>
 
   <div class="card">
+    {% if has_role('admin') %}
+      {# Vive FUERA del formulario de CI: un <form> dentro de otro es HTML
+         inválido y rompería el guardado. Cada botón de la grilla se asocia a
+         este por el atributo form="borrarMovimientoForm". #}
+      <form method="post" action="/records/borrar" id="borrarMovimientoForm"
+            onsubmit="return confirm('Se va a borrar este movimiento de la base. No se puede deshacer. ¿Confirmás?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="volver" value="{{ request.full_path }}">
+      </form>
+    {% endif %}
     <form method="post" action="/records">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {% if rows %}
@@ -145,6 +155,7 @@
                 <th>Monto</th>
                 {% if show_saldo %}<th>Saldo</th>{% endif %}
                 {% if show_ci %}<th>CI</th>{% endif %}
+                {% if has_role('admin') %}<th></th>{% endif %}
               </tr>
             </thead>
             <tbody>
@@ -167,6 +178,13 @@
                       {% else %}
                         {{ row.CI }}
                       {% endif %}
+                    </td>
+                  {% endif %}
+                  {% if has_role('admin') %}
+                    <td data-label="">
+                      <button type="submit" form="borrarMovimientoForm" name="record_hash"
+                              value="{{ row.RecordHash }}" class="btn btn--danger btn--sm"
+                              title="Borrar este movimiento">Borrar</button>
                     </td>
                   {% endif %}
                 </tr>
