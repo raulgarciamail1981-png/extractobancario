@@ -159,13 +159,27 @@ def get_existing_hashes(hashes: list[str], db_path: Path = DEFAULT_DB_PATH) -> s
     return existing
 
 
-def _extract_referencia(raw_json: str | None) -> str:
+# Dato que identifica a un movimiento y que NO cambia entre una descarga y la
+# siguiente, por banco. La clave es un pedazo del nombre del banco (por
+# substring, así el nombre visible puede cambiar sin romper esto) y el valor,
+# el campo de "Raw" donde quedó guardado al leer el extracto.
+RECONCILE_KEY_FIELDS = {
+    'santander': 'referencia',
+    'santa fe': 'nro comprobante',
+}
+
+
+def _extract_raw_field(raw_json: str | None, field: str) -> str:
     if not raw_json:
         return ''
     try:
-        return str(json.loads(raw_json).get('referencia', '') or '').strip()
+        return str(json.loads(raw_json).get(field, '') or '').strip()
     except (TypeError, ValueError):
         return ''
+
+
+def _extract_referencia(raw_json: str | None) -> str:
+    return _extract_raw_field(raw_json, 'referencia')
 
 
 _RECONCILE_MATCH_SQL = text('''
@@ -178,33 +192,44 @@ _RECONCILE_MATCH_SQL = text('''
 def _find_reconcilable_match(conn, banco: str, cuenta: str, fecha: str,
                               cuit: str, monto: float | None, raw_json: str | None,
                               exclude_hash: str) -> str | None:
-    # Santander exporta primero movimientos "a confirmar" y además a veces
-    # reclasifica la Descripcion de un movimiento ya confirmado entre una
-    # extracción y la siguiente (cambia Suc. Origen/Cod. Operativo/Concepto).
-    # En ambos casos es el mismo movimiento real: hay que actualizar la fila
-    # existente, no agregar una nueva. No alcanza con Fecha+Monto+Cuenta
-    # (varias transferencias distintas del mismo día pueden coincidir en
-    # importe, y Saldo no siempre viene informado); el número de
-    # "Referencia" que Santander asigna a cada movimiento sí se mantiene
-    # estable entre reclasificaciones y es lo que realmente identifica al
-    # movimiento sin ambigüedad.
-    # Por substring y no por igualdad: el nombre visible del banco puede
-    # cambiar (hoy es "Santander RIO") y esta lógica tiene que seguir
-    # aplicándose igual, o vuelven a entrar duplicados de los movimientos
-    # "a confirmar".
-    if not banco or 'santander' not in banco.strip().lower():
+    # Hay bancos que devuelven el mismo movimiento con algún dato distinto
+    # entre una descarga y la siguiente. Como esos datos forman parte del
+    # RecordHash, el movimiento entra de nuevo y queda duplicado. Cuando eso
+    # pasa hay que actualizar la fila existente, no agregar una nueva:
+    #
+    # - Santander exporta primero movimientos "a confirmar" y a veces
+    #   reclasifica la Descripcion de uno ya confirmado (cambia Suc. Origen,
+    #   Cod. Operativo o Concepto).
+    # - Santa Fe recalcula el Saldo: en "Movimientos del día" la lista se
+    #   reordena a medida que entran movimientos nuevos, y el saldo acumulado
+    #   de los que ya estaban cambia. El mismo "CRED VS 636478" figuraba con
+    #   saldo 36.867.133,87 a las 12:37 y 55.867.133,87 a las 14:21.
+    #
+    # No alcanza con Fecha+Monto+Cuenta: varias transferencias distintas del
+    # mismo día pueden coincidir en importe. Hace falta el dato estable que
+    # cada banco le asigna al movimiento (la "Referencia" de Santander, el
+    # "Nro. comprobante" de Santa Fe), que es lo que lo identifica sin
+    # ambigüedad.
+    # La búsqueda del banco es por substring y no por igualdad: el nombre
+    # visible puede cambiar (hoy es "Santander RIO") y esto tiene que seguir
+    # aplicándose igual, o vuelven a entrar los duplicados.
+    if not banco:
+        return None
+    banco_norm = banco.strip().lower()
+    field = next((campo for patron, campo in RECONCILE_KEY_FIELDS.items() if patron in banco_norm), None)
+    if field is None:
         return None
     if not fecha or monto is None:
         return None
-    referencia = _extract_referencia(raw_json)
-    if not referencia:
+    clave = _extract_raw_field(raw_json, field)
+    if not clave:
         return None
     rows = conn.execute(_RECONCILE_MATCH_SQL, {
         'banco': banco, 'cuenta': cuenta, 'fecha': fecha, 'cuit': cuit,
         'monto': monto, 'exclude_hash': exclude_hash,
     }).all()
     for record_hash, raw in rows:
-        if _extract_referencia(raw) == referencia:
+        if _extract_raw_field(raw, field) == clave:
             return record_hash
     return None
 
