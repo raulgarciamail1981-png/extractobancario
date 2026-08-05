@@ -109,6 +109,69 @@
 
   {% if has_role('admin') %}
     <div class="card">
+      <div class="card__title">Posibles duplicados</div>
+      <p class="card__hint">
+        Movimientos con el mismo banco, cuenta, fecha, CUIT e importe, pero que quedaron
+        como registros separados porque les cambió el <strong>saldo</strong> o la
+        <strong>descripción</strong>. Esa es la huella de un extracto que el banco reexportó
+        distinto. Ojo: dos operaciones distintas del mismo día por el mismo importe también
+        caen acá y son legítimas — por eso se muestra el grupo entero, para comparar antes de borrar.
+      </p>
+      {% if duplicados %}
+        <div class="toolbar__info">{{ duplicados|length }} grupo(s) para revisar</div>
+        {% for grupo in duplicados %}
+          <div class="dup">
+            <div class="dup__cab">
+              <strong>{{ grupo.fecha_display }}</strong> · {{ grupo.empresa or 'sin empresa' }} ·
+              {{ grupo.banco or 'sin banco' }} · cuenta {{ grupo.cuenta }} ·
+              <span class="mono">{{ grupo.monto_display }}</span>
+              {% if grupo.tiene_repetidos %}
+                <span class="badge badge--danger">hay descripción repetida</span>
+              {% else %}
+                <span class="badge badge--muted">solo coinciden importe y fecha</span>
+              {% endif %}
+            </div>
+            <div class="table-wrap">
+              <table class="data">
+                <thead>
+                  <tr><th>Descripción</th><th>Saldo</th><th>CI</th><th>Archivo</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {% for movimiento in grupo.movimientos %}
+                    <tr>
+                      <td data-label="Descripción" class="cell--wrap">
+                        {{ movimiento.Descripcion }}
+                        {% if movimiento.descripcion_repetida %}
+                          <span class="badge badge--danger">repetido</span>
+                        {% endif %}
+                      </td>
+                      <td data-label="Saldo" class="cell--num">{{ movimiento.saldo_display }}</td>
+                      <td data-label="CI">
+                        {% if movimiento.CI %}<span class="badge badge--warning">{{ movimiento.CI }}</span>{% else %}—{% endif %}
+                      </td>
+                      <td data-label="Archivo" class="mono">{{ movimiento.SourceFile }}</td>
+                      <td>
+                        <form method="post" action="/records/borrar"
+                              onsubmit="return confirm('Se va a borrar este movimiento. No se puede deshacer. ¿Confirmás?');">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                          <input type="hidden" name="record_hash" value="{{ movimiento.RecordHash }}">
+                          <input type="hidden" name="volver" value="/admin">
+                          <button type="submit" class="btn btn--danger btn--sm">Borrar</button>
+                        </form>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="card__hint">No se detectaron movimientos repetidos.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
       <div class="card__title">Extractos importados</div>
       <p class="card__hint">
         Si se subió un extracto equivocado, acá se quitan <strong>solo</strong> los movimientos

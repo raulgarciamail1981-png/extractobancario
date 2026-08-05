@@ -1014,11 +1014,12 @@ def api_latest_unify():
     return {'ts': entry['ts'], 'username': entry['username'], 'detail': entry.get('detail')}
 
 
-def destino_de_vuelta_a_records() -> str:
-    # El destino viene de un formulario: solo se acepta volver al Resumen, para
-    # que no sirva de redirección abierta a otro sitio.
+def destino_de_vuelta() -> str:
+    # El destino viene de un formulario: solo se aceptan las dos pantallas
+    # desde las que se puede borrar, para que no sirva de redirección abierta
+    # a otro sitio.
     destino = request.form.get('volver', '/records')
-    return destino if destino.startswith('/records') else '/records'
+    return destino if destino.startswith(('/records', '/admin')) else '/records'
 
 
 @app.route('/records/borrar', methods=['POST'])
@@ -1045,7 +1046,7 @@ def borrar_movimiento():
             f"de {movimiento['Empresa'] or 'empresa sin asignar'} "
             f"por {format_amount(movimiento['Monto'])}."
         )
-    return redirect(destino_de_vuelta_a_records())
+    return redirect(destino_de_vuelta())
 
 
 @app.route('/records', methods=['GET', 'POST'])
@@ -1403,11 +1404,19 @@ def render_admin(users: list | None = None, message: str | None = None, error: s
     for archivo in archivos:
         archivo['desde_display'] = formato_fecha(archivo['desde'])
         archivo['hasta_display'] = formato_fecha(archivo['hasta'])
+    duplicados = db.posibles_duplicados(db_path=DB_PATH)
+    for grupo in duplicados:
+        grupo['fecha_display'] = formato_fecha(grupo['fecha'])
+        grupo['monto_display'] = format_amount(grupo['monto'])
+        for movimiento in grupo['movimientos']:
+            movimiento['saldo_display'] = format_amount(movimiento['Saldo'])
     return render_template(
         'admin.html', role=session.get('role'),
         users=users if users is not None else load_users(),
-        user_options=get_user_options(), archivos=archivos,
-        message=message, error=error,
+        user_options=get_user_options(), archivos=archivos, duplicados=duplicados,
+        # Si el borrado se hizo desde acá, el aviso vuelve por la sesión.
+        message=message or session.pop('mensaje_flash', None),
+        error=error or session.pop('error_flash', None),
     )
 
 

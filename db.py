@@ -359,6 +359,62 @@ def resumen_por_archivo(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
     return resultado
 
 
+def posibles_duplicados(db_path: Path = DEFAULT_DB_PATH, limite: int = 200) -> list[dict]:
+    """Movimientos que parecen el mismo cargado dos veces.
+
+    La huella del problema es siempre igual: mismo banco, cuenta, fecha, CUIT e
+    importe, pero distinto Saldo o distinta Descripción. Como esos dos campos
+    entran en el RecordHash, el movimiento no se reconoce y entra de nuevo.
+
+    Sirve para detectar con datos si un banco necesita reconciliación, en vez
+    de activarla a ciegas: para reconciliar hace falta un identificador por
+    movimiento, y hay bancos (Macro, Municipal) donde el comprobante es de la
+    operación entera y usarlo borraría movimientos buenos.
+
+    Son "posibles" y no "seguros" a propósito: dos transferencias distintas del
+    mismo día por el mismo importe también caen acá y son legítimas. Por eso se
+    devuelve el grupo entero, para poder compararlos antes de borrar nada.
+    """
+    engine = get_engine(db_path)
+    columnas = ['RecordHash', 'Fecha', 'Empresa', 'CUIT', 'Cuenta', 'Banco',
+                'Descripcion', 'Monto', 'Saldo', 'CI', 'SourceFile']
+    seleccion = ', '.join(f'"{col}"' for col in columnas)
+    with engine.connect() as conn:
+        filas = conn.execute(text(f'SELECT {seleccion} FROM movements')).all()
+
+    grupos: dict[tuple, list[dict]] = {}
+    for fila in filas:
+        item = dict(zip(columnas, fila))
+        monto = None if item['Monto'] is None else round(float(item['Monto']), 2)
+        clave = (item['Banco'] or '', item['Cuenta'] or '', item['Fecha'] or '',
+                 item['CUIT'] or '', monto)
+        grupos.setdefault(clave, []).append(item)
+
+    resultado = []
+    for (banco, cuenta, fecha, cuit, monto), movimientos in grupos.items():
+        if len(movimientos) < 2:
+            continue
+        # La marca va por movimiento y no por grupo: en un mismo grupo puede
+        # haber un duplicado real y además un movimiento legítimo que coincide
+        # en fecha e importe de casualidad. Pasó de verdad con Santa Fe: el
+        # "CRED VS 636478" repetido convivía con un "DEP EFEC" de 3.000.000
+        # que era un depósito distinto. Los que repiten descripción dentro del
+        # grupo son los que casi con seguridad sobran.
+        veces = {}
+        for movimiento in movimientos:
+            veces[movimiento['Descripcion']] = veces.get(movimiento['Descripcion'], 0) + 1
+        for movimiento in movimientos:
+            movimiento['descripcion_repetida'] = veces[movimiento['Descripcion']] > 1
+        resultado.append({
+            'banco': banco, 'cuenta': cuenta, 'fecha': fecha, 'cuit': cuit, 'monto': monto,
+            'empresa': movimientos[0]['Empresa'],
+            'tiene_repetidos': any(cantidad > 1 for cantidad in veces.values()),
+            'movimientos': sorted(movimientos, key=lambda m: (m['Saldo'] is None, m['Saldo'] or 0)),
+        })
+    resultado.sort(key=lambda grupo: (grupo['fecha'], grupo['banco'], grupo['cuenta']), reverse=True)
+    return resultado[:limite]
+
+
 def get_movement(record_hash: str, db_path: Path = DEFAULT_DB_PATH) -> dict | None:
     engine = get_engine(db_path)
     columnas = ['Fecha', 'Empresa', 'CUIT', 'Cuenta', 'Banco', 'Descripcion',
