@@ -348,13 +348,18 @@ def _is_account_label_cell(text: str) -> bool:
     return bool(ACCOUNT_LABEL_CELL_PATTERN.match(normalized))
 
 
-def extract_statement_account(raw: pd.DataFrame) -> str:
-    if raw is None or raw.empty:
-        return ''
+def _iter_row_texts(raw: pd.DataFrame):
     for _, row in raw.iterrows():
         texts = [clean_text(value) for value in row.astype(str).tolist()]
-        if not any(texts):
-            continue
+        if any(texts):
+            yield texts
+
+
+def account_from_strict_patterns(raw: pd.DataFrame) -> str:
+    """Nivel 1: formatos inconfundibles (ej. "118-004636/1"). Muy confiable."""
+    if raw is None or raw.empty:
+        return ''
+    for texts in _iter_row_texts(raw):
         for text in texts:
             if not text:
                 continue
@@ -363,15 +368,46 @@ def extract_statement_account(raw: pd.DataFrame) -> str:
                 match = pattern.search(compact)
                 if match:
                     return normalize_account(match.group(1))
-        has_label = any(_is_account_label_cell(text) for text in texts if text)
-        if has_label:
-            for text in texts:
-                if not text:
-                    continue
-                match = LOOSE_ACCOUNT_PATTERN.search(text.replace(' ', ''))
-                if match:
+    return ''
+
+
+def _es_parte_de_un_importe(compact: str, match: re.Match) -> bool:
+    # Ningún número de cuenta tiene decimales. Un "148567758.38" en la columna
+    # Créditos no puede ser una cuenta, aunque la fila tenga una celda que
+    # parezca etiqueta ("Nro Operacion: ...").
+    if re.match(r'[.,]\d', compact[match.end():]):
+        return True
+    anterior = compact[:match.start()]
+    return bool(re.search(r'\d[.,]$', anterior))
+
+
+def account_from_labeled_rows(raw: pd.DataFrame) -> str:
+    """Nivel 3: número pelado en una fila que tiene etiqueta de cuenta.
+
+    Es el más frágil de todos: alcanza con que una celda arranque con "Nro"
+    para que se acepte cualquier corrida de 6 a 20 dígitos de esa fila. Por eso
+    descarta lo que en realidad es un importe.
+    """
+    if raw is None or raw.empty:
+        return ''
+    for texts in _iter_row_texts(raw):
+        if not any(_is_account_label_cell(text) for text in texts if text):
+            continue
+        for text in texts:
+            if not text:
+                continue
+            compact = text.replace(' ', '')
+            for match in LOOSE_ACCOUNT_PATTERN.finditer(compact):
+                if not _es_parte_de_un_importe(compact, match):
                     return normalize_account(match.group(1))
     return ''
+
+
+def extract_statement_account(raw: pd.DataFrame) -> str:
+    # Las dos pasadas van completas y en orden de confiabilidad. Antes se
+    # resolvía fila por fila, así que un número pelado en la fila 2 le ganaba a
+    # un formato estricto en la fila 5 solo por estar más arriba.
+    return account_from_strict_patterns(raw) or account_from_labeled_rows(raw)
 
 
 # Algunos bancos (ej. Galicia) exportan extractos sin ningún dato de cuenta ni
@@ -386,6 +422,32 @@ def extract_account_from_filename(file_name: str) -> str:
     if match:
         return normalize_account(match.group(1))
     return ''
+
+
+def resolve_statement_account(raw: pd.DataFrame, file_name: str,
+                               bank_accounts: list[dict[str, str]] | None = None) -> str:
+    """Número de cuenta del extracto, por orden de confiabilidad de la fuente.
+
+    1. Formato estricto en el contenido: dato del propio extracto y con una
+       forma inconfundible.
+    2. Nombre del archivo, pero solo si esa cuenta existe en DATOS BANCARIOS.
+       Lo genera el banco al exportar y es verificable.
+    3. Número pelado en una fila con etiqueta de cuenta: sirve, pero se
+       equivoca (en un extracto de Galicia tomaba el importe de un "Rescate
+       Fima" de 148.567.758,38 como número de cuenta, y con eso los 20
+       movimientos caían en "Resolver filas sin Empresa ni CUIT").
+    4. Nombre del archivo sin verificar: mejor algo que nada.
+
+    La clave del orden es que el nombre del archivo nunca le gana a un dato
+    duro del contenido: solo le gana al rastreo frágil.
+    """
+    estricta = account_from_strict_patterns(raw)
+    if estricta:
+        return estricta
+    from_name = extract_account_from_filename(file_name)
+    if from_name and bank_accounts and find_bank_account(from_name, bank_accounts):
+        return from_name
+    return account_from_labeled_rows(raw) or from_name
 
 
 TEXT_WHITESPACE_BYTES = (9, 10, 11, 12, 13)
@@ -1034,7 +1096,7 @@ def gather_statements(source_dir: Path, company_map: Dict[str, str], company_nam
             continue
         bank = guess_bank(path.name)
         file_cuit = extract_file_cuit(df, raw_df)
-        statement_account = extract_statement_account(raw_df) or extract_account_from_filename(path.name)
+        statement_account = resolve_statement_account(raw_df, path.name, bank_accounts)
         metadata = {'source_file': path.name, 'bank': bank, 'file_cuit': file_cuit, 'statement_account': statement_account}
         for idx, row in df.iterrows():
             metadata['source_row'] = idx + 1
@@ -1062,7 +1124,7 @@ def process_statement_file(path: Path, company_map: Dict[str, str], company_name
         df, raw_df = read_excel_file(path, return_raw=True)
     bank = guess_bank(path.name)
     file_cuit = extract_file_cuit(df, raw_df)
-    statement_account = extract_statement_account(raw_df) or extract_account_from_filename(path.name)
+    statement_account = resolve_statement_account(raw_df, path.name, bank_accounts)
     metadata = {'source_file': path.name, 'bank': bank, 'file_cuit': file_cuit, 'statement_account': statement_account}
     rows = []
     for idx, row in df.iterrows():
