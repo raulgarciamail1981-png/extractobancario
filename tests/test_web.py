@@ -379,6 +379,127 @@ def test_unify_reports_per_file_new_vs_repeated_rows(client, app_env):
     assert len(db.load_movements(db_path=app_env['db_path'])) == 3
 
 
+def _seed_macro_btob(db_path, record_hash, nro_referencia, monto, empresa='Alco Rosario SA',
+                      cuenta='376109405439550', fecha='08/05/2026'):
+    record = {
+        'RecordHash': record_hash, 'Fecha': fecha, 'Empresa': empresa,
+        'CUIT': '20111111116', 'Cuenta': cuenta, 'Moneda': 'ARS', 'Banco': 'Macro',
+        'Descripcion': f'TEF DATANET BTOB | {nro_referencia} | 2026', 'Debito': abs(monto),
+        'Credito': None, 'Monto': monto, 'Saldo': 1000000.0, 'CI': '', 'SourceFile': 'archivo1.xls',
+        'SourceRow': 1, 'RAW_nro de referencia': nro_referencia,
+    }
+    db.upsert_movements(pd.DataFrame([record]), db_path=db_path)
+
+
+def test_result_shows_interbanking_prompt_only_when_pending(client, app_env):
+    login(client, 'admin', 'adminpass')
+
+    # Sin nada pendiente todavía: unificar un extracto común no debe preguntar.
+    wb1 = Workbook()
+    ws1 = wb1.active
+    ws1.append(['Fecha', 'Descripcion', 'Monto', 'Saldo', 'Empresa', 'CUIT'])
+    ws1.append(['01/07/2026', 'Movimiento A', '100,00', '900,00', 'Empresa Test', '20111111116'])
+    wb1.save(app_env['upload_dir'] / 'archivo1.xlsx')
+    response = client.post('/unify', data={}, follow_redirects=True)
+    assert 'Unificar registros Interbanking' not in response.get_data(as_text=True)
+
+    # Con un movimiento Macro "TEF DATANET BTOB" pendiente en la base, el
+    # próximo /unify que unifique algo nuevo debe preguntar.
+    _seed_macro_btob(app_env['db_path'], 'btob1', '120378926', -2163345.13)
+    wb2 = Workbook()
+    ws2 = wb2.active
+    ws2.append(['Fecha', 'Descripcion', 'Monto', 'Saldo', 'Empresa', 'CUIT'])
+    ws2.append(['05/07/2026', 'Movimiento B', '200,00', '700,00', 'Empresa Test', '20111111116'])
+    wb2.save(app_env['upload_dir'] / 'archivo2.xlsx')
+    response2 = client.post('/unify', data={}, follow_redirects=True)
+    assert 'Unificar registros Interbanking' in response2.get_data(as_text=True)
+
+
+def test_interbanking_requires_upload_role(client, app_env):
+    login(client, 'cajera', 'cajerapass')
+
+    response = client.get('/interbanking')
+
+    assert response.status_code == 403
+
+
+def test_interbanking_lists_candidates_for_default_pending_account(client, app_env):
+    _seed_macro_btob(app_env['db_path'], 'btob1', '120378926', -2163345.13)
+    _seed_macro_btob(app_env['db_path'], 'btob2', '120378928', -375933.48)
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/interbanking').get_data(as_text=True)
+
+    assert 'TEF DATANET BTOB | 120378926 | 2026' in body
+    assert 'TEF DATANET BTOB | 120378928 | 2026' in body
+    assert 'Alco Rosario SA' in body
+
+
+def test_interbanking_pre_checks_exact_amount_suggestion(client, app_env):
+    _seed_macro_btob(app_env['db_path'], 'btob1', '111', -55705270.66)
+    _seed_macro_btob(app_env['db_path'], 'btob2', '222', -55705270.66, fecha='09/05/2026')
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/interbanking').get_data(as_text=True)
+
+    # El de fecha más reciente (btob2) queda como "A Compensar"; el otro pre-tildado.
+    assert 'value="btob2" class="a-compensar-radio" checked' in body
+    assert 'value="btob1" class="select-checkbox" checked' in body
+
+
+def test_interbanking_apply_with_exact_sum_tags_all_records(client, app_env):
+    _seed_macro_btob(app_env['db_path'], 'a_compensar', '999999', -1520000.0)
+    _seed_macro_btob(app_env['db_path'], 'detalle1', '111', -120000.0)
+    _seed_macro_btob(app_env['db_path'], 'detalle2', '222', -1000000.0)
+    _seed_macro_btob(app_env['db_path'], 'detalle3', '333', -400000.0)
+    login(client, 'admin', 'adminpass')
+
+    response = client.post('/interbanking/apply', data={
+        'empresa': 'Alco Rosario SA', 'cuenta': '376109405439550',
+        'a_compensar_hash': 'a_compensar',
+        'selected_hashes': ['detalle1', 'detalle2', 'detalle3'],
+    })
+
+    body = response.get_data(as_text=True)
+    assert 'Se unificaron 4 registros' in body
+    loaded = db.load_movements(db_path=app_env['db_path']).set_index('RecordHash')
+    for h in ['a_compensar', 'detalle1', 'detalle2', 'detalle3']:
+        assert loaded.loc[h, 'RegistroUnificado'] == '999999'
+    entries = db.load_audit_log(db_path=app_env['db_path'])
+    assert any(e['action'] == 'interbanking_unify' for e in entries)
+
+
+def test_interbanking_apply_with_mismatched_sum_does_not_modify_anything(client, app_env):
+    _seed_macro_btob(app_env['db_path'], 'a_compensar', '999999', -1520000.0)
+    _seed_macro_btob(app_env['db_path'], 'detalle1', '111', -120000.0)
+    login(client, 'admin', 'adminpass')
+
+    response = client.post('/interbanking/apply', data={
+        'empresa': 'Alco Rosario SA', 'cuenta': '376109405439550',
+        'a_compensar_hash': 'a_compensar',
+        'selected_hashes': ['detalle1'],
+    })
+
+    body = response.get_data(as_text=True)
+    assert 'no coincide' in body
+    loaded = db.load_movements(db_path=app_env['db_path']).set_index('RecordHash')
+    assert loaded.loc['a_compensar', 'RegistroUnificado'] == ''
+    assert loaded.loc['detalle1', 'RegistroUnificado'] == ''
+
+
+def test_records_shows_registro_unificado_column_and_is_searchable(client, app_env):
+    _seed_macro_btob(app_env['db_path'], 'btob1', '999999', -1520000.0)
+    db.apply_interbanking_group(['btob1'], '999999', db_path=app_env['db_path'])
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/records').get_data(as_text=True)
+    assert 'Registro Unificado' in body
+    assert '<td data-label="Registro Unificado">999999</td>' in body
+
+    filtered = client.get('/records?search=999999').get_data(as_text=True)
+    assert 'TEF DATANET BTOB' in filtered
+
+
 def test_admin_create_user_stores_nombre(client, app_env):
     login(client, 'admin', 'adminpass')
 
@@ -1176,3 +1297,30 @@ def test_el_rol_comercial_se_muestra_como_asistente_comercial(app_env, monkeypat
     body = c.get('/records').get_data(as_text=True)
 
     assert 'asistente comercial' in body
+
+
+# --------- integracion de Interbanking con esta app (no toca su logica) ---------
+
+def test_el_formulario_de_interbanking_lleva_el_token_csrf(client, app_env):
+    # La proteccion CSRF es de esta app, no venia en el repo de origen. Sin el
+    # token, "Aplicar unificacion" se rechaza con 400 en produccion. En los
+    # tests la proteccion esta apagada, asi que no salta sola: por eso se
+    # verifica que el campo este en el formulario.
+    _seed_macro_btob(app_env['db_path'], 'btob1', '111', -100.0)
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/interbanking').get_data(as_text=True)
+
+    assert 'name="csrf_token"' in body
+
+
+@pytest.mark.parametrize('rol, password, deberia_ver', [
+    ('admin', 'adminpass', True),
+    ('cajera', 'cajerapass', False),
+])
+def test_el_acceso_a_interbanking_aparece_en_el_menu_segun_el_rol(client, app_env, rol, password, deberia_ver):
+    login(client, rol, password)
+
+    body = client.get('/records').get_data(as_text=True)
+
+    assert ('href="/interbanking"' in body) is deberia_ver

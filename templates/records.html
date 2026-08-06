@@ -155,6 +155,7 @@
                 <th>Monto</th>
                 {% if show_saldo %}<th>Saldo</th>{% endif %}
                 {% if show_ci %}<th>CI</th>{% endif %}
+                <th>Registro Unificado</th>
                 {% if has_role('admin') %}<th></th>{% endif %}
               </tr>
             </thead>
@@ -180,6 +181,7 @@
                       {% endif %}
                     </td>
                   {% endif %}
+                  <td data-label="Registro Unificado">{{ row.RegistroUnificado }}</td>
                   {% if has_role('admin') %}
                     <td data-label="">
                       <button type="submit" form="borrarMovimientoForm" name="record_hash"

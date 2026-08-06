@@ -773,7 +773,95 @@ def unify():
             motivo = motivos.get(nombre, 'no se reconoció ninguna fila de movimientos')
             lines.append(f'  · {nombre}: {motivo[:90]}')
     message = '\n'.join(lines)
-    return render_template('result.html', message=message, role=session.get('role'))
+    interbanking_pending = bool(db.get_interbanking_pending_accounts(db_path=DB_PATH))
+    return render_template('result.html', message=message, role=session.get('role'), interbanking_pending=interbanking_pending)
+
+
+INTERBANKING_MATCH_TOLERANCE = 0.01
+
+
+def _build_interbanking_suggestion(candidates: list[dict]) -> tuple[str, list[str]]:
+    # Sugerencia automática: si hay 2 o más candidatos con exactamente el mismo
+    # importe absoluto, se pre-tildan (A Compensar = el de fecha más reciente,
+    # que suele ser el consolidado del banco) — el usuario igual debe confirmar
+    # con "Aplicar unificación", nunca se aplica solo.
+    by_amount: dict[float, list[dict]] = {}
+    for candidate in candidates:
+        by_amount.setdefault(round(candidate['monto_abs'], 2), []).append(candidate)
+    for group in by_amount.values():
+        if len(group) >= 2:
+            group_sorted = sorted(group, key=lambda c: c['fecha'], reverse=True)
+            return group_sorted[0]['hash'], [c['hash'] for c in group_sorted[1:]]
+    return '', []
+
+
+@app.route('/interbanking', methods=['GET'])
+@login_required(role=['admin', 'uploader', 'finanzas'])
+def interbanking():
+    accounts = db.get_interbanking_pending_accounts(db_path=DB_PATH)
+    empresa = request.args.get('empresa', '')
+    cuenta = request.args.get('cuenta', '')
+    if (not empresa or not cuenta) and accounts:
+        empresa, cuenta = accounts[0]['empresa'], accounts[0]['cuenta']
+    candidates = db.get_interbanking_candidates(empresa, cuenta, db_path=DB_PATH) if empresa and cuenta else []
+    suggested_a_compensar_hash, suggested_checked_hashes = _build_interbanking_suggestion(candidates)
+    return render_template(
+        'interbanking.html', role=session.get('role'), display_name=get_display_name(),
+        accounts=accounts, empresa=empresa, cuenta=cuenta, candidates=candidates,
+        suggested_a_compensar_hash=suggested_a_compensar_hash,
+        suggested_checked_hashes=suggested_checked_hashes,
+        message=None, error=None,
+    )
+
+
+@app.route('/interbanking/apply', methods=['POST'])
+@login_required(role=['admin', 'uploader', 'finanzas'])
+def interbanking_apply():
+    empresa = request.form.get('empresa', '')
+    cuenta = request.form.get('cuenta', '')
+    a_compensar_hash = request.form.get('a_compensar_hash', '')
+    selected_hashes = request.form.getlist('selected_hashes')
+
+    candidates = db.get_interbanking_candidates(empresa, cuenta, db_path=DB_PATH)
+    by_hash = {c['hash']: c for c in candidates}
+
+    message = None
+    error = None
+    a_compensar = by_hash.get(a_compensar_hash)
+    selected: list[dict] = []
+    if not a_compensar:
+        error = 'El registro "A Compensar" ya no está disponible. Volvé a intentarlo.'
+    else:
+        selected = [by_hash[h] for h in selected_hashes if h in by_hash and h != a_compensar_hash]
+        if not selected:
+            error = 'Tildá al menos un registro para compensar.'
+        else:
+            total_selected = sum(c['monto_abs'] for c in selected)
+            if abs(total_selected - a_compensar['monto_abs']) > INTERBANKING_MATCH_TOLERANCE:
+                error = (
+                    f'La suma seleccionada (${total_selected:,.2f}) no coincide con el '
+                    f'importe a compensar (${a_compensar["monto_abs"]:,.2f}).'
+                )
+
+    if not error:
+        registro_unificado = a_compensar['referencia']
+        hashes_to_tag = [a_compensar_hash] + [c['hash'] for c in selected]
+        updated = db.apply_interbanking_group(hashes_to_tag, registro_unificado, db_path=DB_PATH)
+        db.log_action(
+            session.get('username'), 'interbanking_unify',
+            detail={'registro_unificado': registro_unificado, 'cantidad': updated, 'empresa': empresa, 'cuenta': cuenta},
+            db_path=DB_PATH,
+        )
+        message = f'Se unificaron {updated} registros bajo "{registro_unificado}".'
+        candidates = db.get_interbanking_candidates(empresa, cuenta, db_path=DB_PATH)
+
+    accounts = db.get_interbanking_pending_accounts(db_path=DB_PATH)
+    return render_template(
+        'interbanking.html', role=session.get('role'), display_name=get_display_name(),
+        accounts=accounts, empresa=empresa, cuenta=cuenta, candidates=candidates,
+        suggested_a_compensar_hash='', suggested_checked_hashes=[],
+        message=message, error=error,
+    )
 
 
 def normalize_currency_value(value: object) -> str:
@@ -821,6 +909,7 @@ def apply_general_search(df: pd.DataFrame, term: str) -> pd.DataFrame:
     # regular (una descripción con paréntesis u otros caracteres especiales
     # no debe romper la búsqueda ni dar resultados inesperados).
     description_mask = df['Descripcion'].astype(str).str.contains(term, case=False, regex=False, na=False)
+    registro_mask = df['RegistroUnificado'].astype(str).str.contains(term, case=False, regex=False, na=False)
     normalized = term.replace('.', '').replace(',', '.')
     try:
         float(normalized)
@@ -828,7 +917,7 @@ def apply_general_search(df: pd.DataFrame, term: str) -> pd.DataFrame:
     except ValueError:
         is_amount = False
     if not is_amount:
-        return df[description_mask]
+        return df[description_mask | registro_mask]
     search_term = term.lstrip('-').strip()
     # Comparamos contra el monto sin separador de miles (solo coma decimal)
     # para que "1500,50" encuentre "1.500,50" sin que el punto de miles
@@ -836,8 +925,8 @@ def apply_general_search(df: pd.DataFrame, term: str) -> pd.DataFrame:
     plain_abs = df['Monto_raw'].abs().apply(lambda v: '' if pd.isna(v) else f'{v:.2f}'.replace('.', ','))
     amount_mask = plain_abs.str.contains(search_term, regex=False, na=False)
     # Un término numérico puede ser tanto un monto como un código/referencia
-    # dentro de la descripción (ej. "0718", "000105255"); se buscan ambos.
-    return df[description_mask | amount_mask]
+    # dentro de la descripción o del Registro Unificado (ej. "0718", "120378921").
+    return df[description_mask | amount_mask | registro_mask]
 
 
 def apply_record_filters(df: pd.DataFrame, empresa: str, banco: str, fecha: str, fecha_desde: str, fecha_hasta: str,
@@ -894,6 +983,9 @@ def prepare_display_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if 'CI' not in df.columns:
         df['CI'] = ''
     df['CI'] = df['CI'].astype(str)
+    if 'RegistroUnificado' not in df.columns:
+        df['RegistroUnificado'] = ''
+    df['RegistroUnificado'] = df['RegistroUnificado'].astype(str).replace('nan', '').replace('None', '')
     if 'CUIT' not in df.columns:
         df['CUIT'] = ''
     df['CUIT'] = df['CUIT'].astype(str).replace('nan', '')
@@ -1246,6 +1338,7 @@ def get_export_columns(show_saldo: bool) -> list[str]:
     if show_saldo:
         columns.append('Saldo')
     columns.append('CI')
+    columns.append('RegistroUnificado')
     return columns
 
 
@@ -1264,11 +1357,11 @@ def load_filtered_export_dataframe(filters: dict) -> pd.DataFrame:
 PDF_COLUMN_LABELS = {
     'Fecha': 'Fecha', 'Empresa': 'Empresa', 'CUIT': 'CUIT', 'Cuenta': 'Cuenta',
     'Moneda': 'Moneda', 'Banco': 'Banco', 'Descripcion': 'Descripción',
-    'Monto': 'Monto', 'Saldo': 'Saldo', 'CI': 'CI',
+    'Monto': 'Monto', 'Saldo': 'Saldo', 'CI': 'CI', 'RegistroUnificado': 'Registro Unificado',
 }
 PDF_COLUMN_WEIGHTS = {
-    'Fecha': 0.07, 'Empresa': 0.13, 'CUIT': 0.09, 'Cuenta': 0.10, 'Moneda': 0.05,
-    'Banco': 0.09, 'Descripcion': 0.27, 'Monto': 0.09, 'Saldo': 0.08, 'CI': 0.08,
+    'Fecha': 0.07, 'Empresa': 0.12, 'CUIT': 0.08, 'Cuenta': 0.09, 'Moneda': 0.05,
+    'Banco': 0.08, 'Descripcion': 0.24, 'Monto': 0.08, 'Saldo': 0.07, 'CI': 0.06, 'RegistroUnificado': 0.06,
 }
 
 

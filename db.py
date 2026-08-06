@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import (Column, Engine, Float, Integer, MetaData, Table, Text, bindparam, create_engine,
-                         event, text)
+                         event, inspect, text)
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / 'conciliador.db'
 
 MOVEMENT_COLUMNS = [
     'Fecha', 'Empresa', 'CUIT', 'Cuenta', 'Moneda', 'Banco', 'Descripcion',
-    'Debito', 'Credito', 'Monto', 'Saldo', 'CI', 'SourceFile', 'SourceRow',
+    'Debito', 'Credito', 'Monto', 'Saldo', 'CI', 'RegistroUnificado', 'SourceFile', 'SourceRow',
 ]
 
 metadata = MetaData()
@@ -31,6 +31,7 @@ movements_table = Table(
     Column('Monto', Float),
     Column('Saldo', Float),
     Column('CI', Text),
+    Column('RegistroUnificado', Text),
     Column('SourceFile', Text),
     Column('SourceRow', Integer),
     Column('Raw', Text),
@@ -86,6 +87,7 @@ def get_engine(db_path: Path = DEFAULT_DB_PATH) -> Engine:
             cursor.execute('PRAGMA busy_timeout=5000')
             cursor.close()
     metadata.create_all(engine)
+    _ensure_columns(engine)
     # Los avisos consultan el audit_log por acción y fecha en cada pantalla, y
     # esa tabla solo crece. Va aparte de create_all() porque para una tabla que
     # ya existe (el servidor) create_all no agrega los índices que falten.
@@ -94,6 +96,21 @@ def get_engine(db_path: Path = DEFAULT_DB_PATH) -> Engine:
                           'ON audit_log ("action", "ts")'))
     _ENGINES[url] = engine
     return engine
+
+
+def _ensure_columns(engine: Engine) -> None:
+    # metadata.create_all() solo crea tablas que no existen; una base ya
+    # existente (ej. conciliador.db de producción) no gana columnas nuevas
+    # agregadas al esquema (como RegistroUnificado) sin este paso manual.
+    inspector = inspect(engine)
+    if 'movements' not in inspector.get_table_names():
+        return
+    existing = {col['name'] for col in inspector.get_columns('movements')}
+    for column in movements_table.columns:
+        if column.name not in existing:
+            column_type = column.type.compile(engine.dialect)
+            with engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE movements ADD COLUMN "{column.name}" {column_type}'))
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
@@ -135,6 +152,7 @@ def _row_to_db_params(row: dict) -> dict:
         'Monto': row.get('Monto') if row.get('Monto') not in ('', None) else None,
         'Saldo': row.get('Saldo') if row.get('Saldo') not in ('', None) else None,
         'CI': str(row.get('CI', '') or ''),
+        'RegistroUnificado': str(row.get('RegistroUnificado', '') or ''),
         'SourceFile': str(row.get('SourceFile', '') or ''),
         'SourceRow': int(row.get('SourceRow') or 0),
         'Raw': json.dumps(raw, ensure_ascii=False, default=str) if raw else None,
@@ -159,28 +177,41 @@ def get_existing_hashes(hashes: list[str], db_path: Path = DEFAULT_DB_PATH) -> s
     return existing
 
 
-# Dato que identifica a un movimiento y que NO cambia entre una descarga y la
-# siguiente, por banco. La clave es un pedazo del nombre del banco (por
-# substring, así el nombre visible puede cambiar sin romper esto) y el valor,
-# el campo de "Raw" donde quedó guardado al leer el extracto.
-RECONCILE_KEY_FIELDS = {
-    'santander': 'referencia',
-    'santa fe': 'nro comprobante',
-}
+# Cada banco identifica cada movimiento con un número de comprobante o
+# referencia propio, en una columna con nombre distinto (ver
+# BANK_DESCRIPTION_COLUMNS en conciliador.py). Ese número es estable entre
+# extracciones aunque cambie la Descripcion (Santander reclasifica Suc.
+# Origen/Cod. Operativo/Concepto) o el Saldo (Santa Fe informa un saldo
+# provisorio en "Movimientos del día" que crece en cada re-extracción hasta
+# que el movimiento queda asentado): es lo único que realmente identifica al
+# movimiento sin ambigüedad entre dos pulls del mismo extracto.
+_REFERENCE_FIELD_CANDIDATES = [
+    'referencia', 'nro comprobante', 'n de comprobante', 'numero de comprobante',
+    'nro de referencia', 'nro de cheque',
+]
 
 
-def _extract_raw_field(raw_json: str | None, field: str) -> str:
+def _extract_reference_number(raw_json: str | None) -> str:
     if not raw_json:
         return ''
     try:
-        return str(json.loads(raw_json).get(field, '') or '').strip()
+        raw = json.loads(raw_json)
     except (TypeError, ValueError):
         return ''
+    for field in _REFERENCE_FIELD_CANDIDATES:
+        value = str(raw.get(field, '') or '').strip()
+        if value:
+            return value
+    return ''
 
 
-def _extract_referencia(raw_json: str | None) -> str:
-    return _extract_raw_field(raw_json, 'referencia')
-
+# Los pagos a proveedores "TEF DATANET BTOB" de Macro se concilian a mano en
+# la pantalla de Interbanking (ver más abajo), no automáticamente: dos filas
+# con el mismo importe y referencia pueden ser el mismo movimiento reexportado
+# o pueden ser dos movimientos que el usuario todavía tiene que decidir cómo
+# agrupar (detalle vs. consolidado). Fusionarlas solas le sacaría esa decisión
+# de las manos, así que quedan afuera de la reconciliación automática.
+_INTERBANKING_CONCEPT = 'TEF DATANET BTOB'
 
 _RECONCILE_MATCH_SQL = text('''
     SELECT "RecordHash", "Raw" FROM movements
@@ -190,46 +221,24 @@ _RECONCILE_MATCH_SQL = text('''
 
 
 def _find_reconcilable_match(conn, banco: str, cuenta: str, fecha: str,
-                              cuit: str, monto: float | None, raw_json: str | None,
-                              exclude_hash: str) -> str | None:
-    # Hay bancos que devuelven el mismo movimiento con algún dato distinto
-    # entre una descarga y la siguiente. Como esos datos forman parte del
-    # RecordHash, el movimiento entra de nuevo y queda duplicado. Cuando eso
-    # pasa hay que actualizar la fila existente, no agregar una nueva:
-    #
-    # - Santander exporta primero movimientos "a confirmar" y a veces
-    #   reclasifica la Descripcion de uno ya confirmado (cambia Suc. Origen,
-    #   Cod. Operativo o Concepto).
-    # - Santa Fe recalcula el Saldo: en "Movimientos del día" la lista se
-    #   reordena a medida que entran movimientos nuevos, y el saldo acumulado
-    #   de los que ya estaban cambia. El mismo "CRED VS 636478" figuraba con
-    #   saldo 36.867.133,87 a las 12:37 y 55.867.133,87 a las 14:21.
-    #
-    # No alcanza con Fecha+Monto+Cuenta: varias transferencias distintas del
-    # mismo día pueden coincidir en importe. Hace falta el dato estable que
-    # cada banco le asigna al movimiento (la "Referencia" de Santander, el
-    # "Nro. comprobante" de Santa Fe), que es lo que lo identifica sin
-    # ambigüedad.
-    # La búsqueda del banco es por substring y no por igualdad: el nombre
-    # visible puede cambiar (hoy es "Santander RIO") y esto tiene que seguir
-    # aplicándose igual, o vuelven a entrar los duplicados.
-    if not banco:
-        return None
-    banco_norm = banco.strip().lower()
-    field = next((campo for patron, campo in RECONCILE_KEY_FIELDS.items() if patron in banco_norm), None)
-    if field is None:
-        return None
+                              cuit: str, monto: float | None, descripcion: str | None,
+                              raw_json: str | None, exclude_hash: str) -> str | None:
+    # No alcanza con Fecha+Monto+Cuenta (varias transferencias distintas del
+    # mismo día pueden coincidir en importe, y el Saldo no siempre es
+    # confiable como desempate); el número de comprobante/referencia sí lo es.
     if not fecha or monto is None:
         return None
-    clave = _extract_raw_field(raw_json, field)
-    if not clave:
+    if banco and banco.strip().lower() == 'macro' and _INTERBANKING_CONCEPT in (descripcion or ''):
+        return None
+    reference = _extract_reference_number(raw_json)
+    if not reference:
         return None
     rows = conn.execute(_RECONCILE_MATCH_SQL, {
         'banco': banco, 'cuenta': cuenta, 'fecha': fecha, 'cuit': cuit,
         'monto': monto, 'exclude_hash': exclude_hash,
     }).all()
     for record_hash, raw in rows:
-        if _extract_raw_field(raw, field) == clave:
+        if _extract_reference_number(raw) == reference:
             return record_hash
     return None
 
@@ -237,10 +246,10 @@ def _find_reconcilable_match(conn, banco: str, cuenta: str, fecha: str,
 _INSERT_SQL = text('''
     INSERT INTO movements (
         "RecordHash", "Fecha", "Empresa", "CUIT", "Cuenta", "Moneda", "Banco", "Descripcion",
-        "Debito", "Credito", "Monto", "Saldo", "CI", "SourceFile", "SourceRow", "Raw"
+        "Debito", "Credito", "Monto", "Saldo", "CI", "RegistroUnificado", "SourceFile", "SourceRow", "Raw"
     ) VALUES (
         :RecordHash, :Fecha, :Empresa, :CUIT, :Cuenta, :Moneda, :Banco, :Descripcion,
-        :Debito, :Credito, :Monto, :Saldo, :CI, :SourceFile, :SourceRow, :Raw
+        :Debito, :Credito, :Monto, :Saldo, :CI, :RegistroUnificado, :SourceFile, :SourceRow, :Raw
     )
     ON CONFLICT("RecordHash") DO UPDATE SET
         "Fecha"=excluded."Fecha", "Empresa"=excluded."Empresa", "CUIT"=excluded."CUIT",
@@ -249,6 +258,8 @@ _INSERT_SQL = text('''
         "Credito"=excluded."Credito", "Monto"=excluded."Monto", "Saldo"=excluded."Saldo",
         "CI" = CASE WHEN movements."CI" IS NOT NULL AND movements."CI" != ''
                   THEN movements."CI" ELSE excluded."CI" END,
+        "RegistroUnificado" = CASE WHEN movements."RegistroUnificado" IS NOT NULL AND movements."RegistroUnificado" != ''
+                  THEN movements."RegistroUnificado" ELSE excluded."RegistroUnificado" END,
         "SourceFile"=excluded."SourceFile", "SourceRow"=excluded."SourceRow", "Raw"=excluded."Raw"
 ''')
 
@@ -280,7 +291,7 @@ def upsert_movements(df: pd.DataFrame, db_path: Path = DEFAULT_DB_PATH) -> tuple
                 continue
             match_hash = _find_reconcilable_match(
                 conn, value['Banco'], value['Cuenta'], value['Fecha'], value['CUIT'],
-                value['Monto'], value['Raw'], record_hash,
+                value['Monto'], value['Descripcion'], value['Raw'], record_hash,
             )
             if match_hash:
                 conn.execute(_RECONCILE_UPDATE_SQL, {
@@ -456,6 +467,68 @@ def update_ci(record_hash: str, ci_value: str, db_path: Path = DEFAULT_DB_PATH) 
             {'ci': ci_value, 'record_hash': record_hash},
         )
         return result.rowcount > 0
+
+
+# "Unificar registros Interbanking": Macro concilia pagos a proveedores subidos en
+# detalle (varias filas "TEF DATANET BTOB") en uno o pocos registros al día
+# siguiente. No hay forma automática de saber qué detalles corresponden a qué
+# consolidado (el importe y hasta el número de comprobante pueden repetirse o no
+# guardar relación 1 a 1), así que el usuario arma el grupo a mano; acá solo se
+# guarda el resultado: todos los movimientos del grupo comparten el mismo valor de
+# "RegistroUnificado" (el "Nro. de Referencia" que el usuario eligió como
+# referencia del grupo). _INTERBANKING_CONCEPT está definido más arriba, junto a
+# _find_reconcilable_match (también lo usa para excluir estos movimientos de la
+# reconciliación automática).
+
+_INTERBANKING_CANDIDATES_SQL = text('''
+    SELECT "RecordHash", "Fecha", "Descripcion", "Monto", "Raw" FROM movements
+    WHERE lower("Banco") = 'macro' AND "Empresa" = :empresa AND "Cuenta" = :cuenta
+      AND "Descripcion" LIKE :concept
+      AND ("RegistroUnificado" IS NULL OR "RegistroUnificado" = '')
+    ORDER BY "Fecha", "RecordHash"
+''')
+
+
+def get_interbanking_candidates(empresa: str, cuenta: str, db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
+    engine = get_engine(db_path)
+    with engine.connect() as conn:
+        rows = conn.execute(_INTERBANKING_CANDIDATES_SQL, {
+            'empresa': empresa, 'cuenta': cuenta, 'concept': f'%{_INTERBANKING_CONCEPT}%',
+        }).all()
+    candidates = []
+    for record_hash, fecha, descripcion, monto, raw in rows:
+        candidates.append({
+            'hash': record_hash, 'fecha': fecha, 'descripcion': descripcion,
+            'monto': monto, 'monto_abs': abs(monto) if monto is not None else 0.0,
+            'referencia': _extract_reference_number(raw),
+        })
+    return candidates
+
+
+_INTERBANKING_PENDING_ACCOUNTS_SQL = text('''
+    SELECT DISTINCT "Empresa", "Cuenta" FROM movements
+    WHERE lower("Banco") = 'macro' AND "Descripcion" LIKE :concept
+      AND ("RegistroUnificado" IS NULL OR "RegistroUnificado" = '')
+    ORDER BY "Empresa", "Cuenta"
+''')
+
+
+def get_interbanking_pending_accounts(db_path: Path = DEFAULT_DB_PATH) -> list[dict]:
+    engine = get_engine(db_path)
+    with engine.connect() as conn:
+        rows = conn.execute(_INTERBANKING_PENDING_ACCOUNTS_SQL, {'concept': f'%{_INTERBANKING_CONCEPT}%'}).all()
+    return [{'empresa': empresa, 'cuenta': cuenta} for empresa, cuenta in rows]
+
+
+def apply_interbanking_group(record_hashes: list[str], registro_unificado: str,
+                              db_path: Path = DEFAULT_DB_PATH) -> int:
+    engine = get_engine(db_path)
+    query = text('UPDATE movements SET "RegistroUnificado" = :valor WHERE "RecordHash" IN :hashes').bindparams(
+        bindparam('hashes', expanding=True)
+    )
+    with engine.begin() as conn:
+        result = conn.execute(query, {'valor': registro_unificado, 'hashes': list(record_hashes)})
+        return result.rowcount
 
 
 def log_action(username: str, action: str, detail: dict | None = None, record_hash: str | None = None,

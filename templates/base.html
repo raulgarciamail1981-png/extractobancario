@@ -24,6 +24,9 @@
                   <a class="navlink{% if request.endpoint == 'upload' %} navlink--active{% endif %}" href="/upload">Carga</a>
                 {% endif %}
                 <a class="navlink{% if request.endpoint == 'records' %} navlink--active{% endif %}" href="/records">Resumen</a>
+                {% if has_role('admin', 'uploader', 'finanzas') %}
+                  <a class="navlink{% if request.endpoint == 'interbanking' %} navlink--active{% endif %}" href="/interbanking">Interbanking</a>
+                {% endif %}
                 {% if has_role('admin') %}
                   <a class="navlink{% if request.endpoint == 'admin' %} navlink--active{% endif %}" href="/admin">Admin</a>
                   <a class="navlink{% if request.endpoint == 'admin_audit' %} navlink--active{% endif %}" href="/admin/audit">Auditoría</a>

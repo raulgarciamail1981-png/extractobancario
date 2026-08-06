@@ -152,6 +152,155 @@ def test_upsert_santander_without_referencia_does_not_reconcile(tmp_path):
     assert len(loaded) == 2
 
 
+def _santa_fe_record(record_hash, nro_comprobante, saldo, source_file, monto=3000000.0, fecha='05/08/2026'):
+    return {
+        'RecordHash': record_hash, 'Fecha': fecha, 'Empresa': 'Alco Rosario SA',
+        'CUIT': '30612502354', 'Cuenta': '000005252000', 'Moneda': 'ARS', 'Banco': 'Santa Fe',
+        'Descripcion': 'CRED VS | ' + nro_comprobante, 'Debito': None, 'Credito': monto, 'Monto': monto,
+        'Saldo': saldo, 'CI': '', 'SourceFile': source_file, 'SourceRow': 14,
+        'RAW_nro comprobante': nro_comprobante,
+    }
+
+
+def test_upsert_santa_fe_reconciles_by_nro_comprobante_despite_different_saldo(tmp_path):
+    # Bug real reportado: dos extracciones de Santa Fe el mismo día muestran
+    # el mismo movimiento ("Movimientos del día", saldo todavía provisorio)
+    # con Saldo distinto porque entre una y otra se asentaron más
+    # movimientos. Fecha, Monto y Descripcion son iguales; solo el Saldo
+    # cambia. La reconciliación no es exclusiva de Santander: cualquier banco
+    # con un número de comprobante estable en el Raw debe reusar la fila.
+    db_path = tmp_path / 'test.db'
+    db.upsert_movements(pd.DataFrame([
+        _santa_fe_record('hash1', '636478', 36867133.87, 'Movimientos del dia - 2026-08-05T123745.xls'),
+    ]), db_path=db_path)
+
+    total, new_count = db.upsert_movements(pd.DataFrame([
+        _santa_fe_record('hash2', '636478', 55867133.87, 'Movimientos del dia - 2026-08-05T142114.xls'),
+    ]), db_path=db_path)
+
+    assert new_count == 0
+    loaded = db.load_movements(db_path=db_path)
+    assert len(loaded) == 1
+    assert loaded.iloc[0]['Saldo'] == 55867133.87
+    assert loaded.iloc[0]['RecordHash'] == 'hash2'
+
+
+def test_upsert_santa_fe_does_not_merge_different_nro_comprobante(tmp_path):
+    db_path = tmp_path / 'test.db'
+    db.upsert_movements(pd.DataFrame([
+        _santa_fe_record('hash1', '636478', 36867133.87, 'archivo1.xls'),
+    ]), db_path=db_path)
+
+    total, new_count = db.upsert_movements(pd.DataFrame([
+        _santa_fe_record('hash2', '636999', 40000000.0, 'archivo2.xls'),
+    ]), db_path=db_path)
+
+    assert new_count == 1
+    loaded = db.load_movements(db_path=db_path)
+    assert len(loaded) == 2
+
+
+def _macro_btob_record(record_hash, nro_referencia, monto, fecha='08/05/2026',
+                        empresa='Alco Rosario SA', cuenta='376109405439550'):
+    return {
+        'RecordHash': record_hash, 'Fecha': fecha, 'Empresa': empresa,
+        'CUIT': '30612502354', 'Cuenta': cuenta, 'Moneda': 'ARS', 'Banco': 'Macro',
+        'Descripcion': f'TEF DATANET BTOB | {nro_referencia} | 2026', 'Debito': abs(monto),
+        'Credito': None, 'Monto': monto, 'Saldo': 1000000.0, 'CI': '', 'SourceFile': 'archivo1.xls',
+        'SourceRow': 1, 'RAW_nro de referencia': nro_referencia,
+    }
+
+
+def test_get_interbanking_candidates_lists_only_untagged_macro_btob(tmp_path):
+    db_path = tmp_path / 'test.db'
+    db.upsert_movements(pd.DataFrame([
+        _macro_btob_record('hash1', '120378926', -2163345.13),
+        _macro_btob_record('hash2', '120378928', -375933.48),
+        # Otra cuenta: no debe aparecer al pedir la cuenta de arriba.
+        _macro_btob_record('hash3', '999', -100.0, cuenta='OTRA-CUENTA'),
+        # Otro banco con concepto parecido: no es candidato.
+        {**_record('hash4'), 'Banco': 'Santander', 'Descripcion': 'TEF DATANET BTOB | 1 | 2026'},
+    ]), db_path=db_path)
+
+    candidates = db.get_interbanking_candidates('Alco Rosario SA', '376109405439550', db_path=db_path)
+
+    assert {c['hash'] for c in candidates} == {'hash1', 'hash2'}
+    by_hash = {c['hash']: c for c in candidates}
+    assert by_hash['hash1']['monto_abs'] == 2163345.13
+    assert by_hash['hash1']['referencia'] == '120378926'
+
+
+def test_macro_btob_never_auto_reconciles_even_with_same_amount_and_referencia(tmp_path):
+    # Caso real reportado: un TEF DATANET BTOB reaparece en dos extractos con
+    # el mismo importe y la misma "Nro. de Referencia". A diferencia de
+    # Santander/Santa Fe, acá NO debe fusionarse solo (aunque parezca "el
+    # mismo movimiento") — la decisión de agrupar TEF DATANET BTOB queda
+    # siempre en manos del usuario, vía "Unificar registros Interbanking".
+    db_path = tmp_path / 'test.db'
+    db.upsert_movements(pd.DataFrame([
+        _macro_btob_record('hash1', '120358916', -55705270.66),
+    ]), db_path=db_path)
+
+    total, new_count = db.upsert_movements(pd.DataFrame([
+        _macro_btob_record('hash2', '120358916', -55705270.66),
+    ]), db_path=db_path)
+
+    assert new_count == 1
+    loaded = db.load_movements(db_path=db_path)
+    assert len(loaded) == 2
+    candidates = db.get_interbanking_candidates('Alco Rosario SA', '376109405439550', db_path=db_path)
+    assert {c['hash'] for c in candidates} == {'hash1', 'hash2'}
+
+
+def test_get_interbanking_candidates_excludes_already_tagged(tmp_path):
+    db_path = tmp_path / 'test.db'
+    db.upsert_movements(pd.DataFrame([
+        _macro_btob_record('hash1', '120378926', -2163345.13),
+        _macro_btob_record('hash2', '120378928', -375933.48),
+    ]), db_path=db_path)
+    db.apply_interbanking_group(['hash1'], 'GRUPO-1', db_path=db_path)
+
+    candidates = db.get_interbanking_candidates('Alco Rosario SA', '376109405439550', db_path=db_path)
+
+    assert {c['hash'] for c in candidates} == {'hash2'}
+
+
+def test_get_interbanking_pending_accounts_reflects_state(tmp_path):
+    db_path = tmp_path / 'test.db'
+    assert db.get_interbanking_pending_accounts(db_path=db_path) == []
+
+    db.upsert_movements(pd.DataFrame([
+        _macro_btob_record('hash1', '120378926', -2163345.13),
+    ]), db_path=db_path)
+    pending = db.get_interbanking_pending_accounts(db_path=db_path)
+    assert pending == [{'empresa': 'Alco Rosario SA', 'cuenta': '376109405439550'}]
+
+    db.apply_interbanking_group(['hash1'], 'GRUPO-1', db_path=db_path)
+    assert db.get_interbanking_pending_accounts(db_path=db_path) == []
+
+
+def test_apply_interbanking_group_tags_all_given_hashes_and_nothing_else(tmp_path):
+    # Caso real: 1.520.000 = 120.000 + 1.000.000 + 400.000.
+    db_path = tmp_path / 'test.db'
+    db.upsert_movements(pd.DataFrame([
+        _macro_btob_record('a_compensar', '999999', -1520000.0),
+        _macro_btob_record('detalle1', '111111', -120000.0),
+        _macro_btob_record('detalle2', '222222', -1000000.0),
+        _macro_btob_record('detalle3', '333333', -400000.0),
+        _macro_btob_record('otro', '444444', -50000.0),
+    ]), db_path=db_path)
+
+    updated = db.apply_interbanking_group(
+        ['a_compensar', 'detalle1', 'detalle2', 'detalle3'], '999999', db_path=db_path,
+    )
+
+    assert updated == 4
+    loaded = db.load_movements(db_path=db_path).set_index('RecordHash')
+    for h in ['a_compensar', 'detalle1', 'detalle2', 'detalle3']:
+        assert loaded.loc[h, 'RegistroUnificado'] == '999999'
+    assert loaded.loc['otro', 'RegistroUnificado'] == ''
+
+
 def test_log_action_and_load_audit_log(tmp_path):
     db_path = tmp_path / 'test.db'
 

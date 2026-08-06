@@ -96,8 +96,10 @@ def test_no_se_fusiona_entre_dias_distintos(tmp_path):
     assert len(db.load_movements(db_path=db_path)) == 2
 
 
-def test_un_banco_sin_clave_estable_no_reconcilia(tmp_path):
-    # Galicia no está en RECONCILE_KEY_FIELDS: su comportamiento no cambia.
+def test_la_reconciliacion_vale_para_cualquier_banco(tmp_path):
+    # No hay lista de bancos habilitados: alcanza con que el extracto traiga un
+    # número de comprobante o referencia (_REFERENCE_FIELD_CANDIDATES). Galicia
+    # entra igual que Santa Fe.
     db_path = tmp_path / 'test.db'
     primero = _santa_fe('hash1', '636478', 100.0)
     primero['Banco'] = 'Galicia'
@@ -107,8 +109,10 @@ def test_un_banco_sin_clave_estable_no_reconcilia(tmp_path):
 
     total, nuevas = db.upsert_movements(pd.DataFrame([segundo]), db_path=db_path)
 
-    assert nuevas == 1
-    assert len(db.load_movements(db_path=db_path)) == 2
+    assert nuevas == 0
+    guardados = db.load_movements(db_path=db_path)
+    assert len(guardados) == 1
+    assert guardados.iloc[0]['Saldo'] == 200.0
 
 
 def test_el_ci_ya_cargado_no_se_pierde_al_reconciliar(tmp_path):

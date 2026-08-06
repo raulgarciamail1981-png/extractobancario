@@ -13,6 +13,17 @@
       <div class="alert alert--error alert--block">{{ error }}</div>
     {% endif %}
 
+    {% if interbanking_pending %}
+      <div class="aviso">
+        <span class="aviso__icono" aria-hidden="true">🔗</span>
+        <div class="aviso__texto">
+          <strong>¿Unificar registros Interbanking?</strong>
+          <span class="aviso__detalle">Hay movimientos «TEF DATANET BTOB» de Macro pendientes de conciliar.</span>
+        </div>
+        <a class="btn btn--ghost btn--sm" href="/interbanking">Sí, revisar</a>
+      </div>
+    {% endif %}
+
     <div class="toolbar__actions">
       <a class="btn btn--primary" href="/upload">Volver a la carga</a>
       <a class="btn btn--ghost" href="/records">Ver el resumen</a>
