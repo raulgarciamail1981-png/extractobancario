@@ -409,14 +409,18 @@ table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 }
 
 /* ----------------------------- barra Guardar CI -------------------------- */
+/* Barra de ancho completo abajo, no un recuadro flotante a la derecha: ahí
+   tapaba las tarjetas de resumen (cortaba "DASEOS SA") y filas de la grilla al
+   scrollear. Fija sí, porque con cientos de filas en pantalla obligar a bajar
+   hasta el final para guardar un CI es peor. */
 .save-ci-bar {
-  position: fixed; bottom: 1.4rem; right: 1.4rem; z-index: 50;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -4px 16px rgba(16, 28, 44, 0.08);
   padding: 0.85rem 1.1rem;
-  display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: center;
+  display: flex; gap: 0.8rem; flex-wrap: wrap;
+  align-items: center; justify-content: center;
 }
 .save-ci-bar__hint { color: var(--text-muted); font-size: 0.85rem; }
 body.has-save-ci-bar .main { padding-bottom: 6rem; }
@@ -451,8 +455,7 @@ body.has-save-ci-bar .main { padding-bottom: 6rem; }
   .data .cell--wrap, .data .cell--num { max-width: none; text-align: right; }
   .ci-cell-field { width: 100%; max-width: 160px; }
 
-  .save-ci-bar {
-    left: 0; right: 0; bottom: 0; border-radius: var(--radius) var(--radius) 0 0;
-    justify-content: center; text-align: center;
-  }
+  /* En celular ya venía así; ahora es igual en todos los tamaños y solo
+     queda centrar el texto del cartel cuando parte en dos líneas. */
+  .save-ci-bar { text-align: center; }
 }

@@ -221,3 +221,59 @@ def test_la_cantidad_de_columnas_coincide_entre_encabezado_y_filas(client, app_e
     columnas_fila = len(re.findall(r'<td[\s>]', primera_fila))
     assert columnas_encabezado == columnas_fila
     assert columnas_encabezado > 0
+
+
+# --------- guardar CI no debe registrar lo que no cambio (ruido en auditoria) ---------
+
+def _con_ci(db_path, record_hash, ci, empresa='EMPRESA TEST SA'):
+    _movimiento(db_path, record_hash, ci=ci, empresa=empresa)
+
+
+def test_guardar_sin_tocar_nada_no_escribe_en_auditoria(client, app_env):
+    # La grilla manda el CI de todas las filas visibles. Un clic en "Guardar
+    # CI" sin cambiar nada llenaba la auditoria de entradas con antes == despues.
+    for h in ('h1', 'h2', 'h3'):
+        _con_ci(app_env['db_path'], h, f'CI-{h}')
+    _login(client, 'admin')
+
+    client.post('/records', data={
+        'record_hash': ['h1', 'h2', 'h3'],
+        'ci_h1': 'CI-h1', 'ci_h2': 'CI-h2', 'ci_h3': 'CI-h3',
+    })
+
+    assert db.get_last_action_entry('update_ci', db_path=app_env['db_path']) is None
+
+
+def test_solo_se_registra_el_que_cambio(client, app_env):
+    for h in ('h1', 'h2', 'h3'):
+        _con_ci(app_env['db_path'], h, f'CI-{h}')
+    _login(client, 'admin')
+
+    client.post('/records', data={
+        'record_hash': ['h1', 'h2', 'h3'],
+        'ci_h1': 'CI-h1', 'ci_h2': 'CI-NUEVO', 'ci_h3': 'CI-h3',
+    })
+
+    entradas = [e for e in db.load_audit_log(db_path=app_env['db_path']) if e['action'] == 'update_ci']
+    assert len(entradas) == 1
+    assert entradas[0]['record_hash'] == 'h2'
+    assert entradas[0]['detail'] == {'antes': 'CI-h2', 'despues': 'CI-NUEVO'}
+
+
+def test_cargar_un_ci_por_primera_vez_sigue_registrandose(client, app_env):
+    _movimiento(app_env['db_path'], 'h1')
+    _login(client, 'admin')
+
+    client.post('/records', data={'record_hash': 'h1', 'ci_h1': 'CI-123'})
+
+    entrada = db.get_last_action_entry('update_ci', db_path=app_env['db_path'])
+    assert entrada['detail'] == {'antes': '', 'despues': 'CI-123'}
+
+
+def test_avisa_cuando_no_hubo_cambios(client, app_env):
+    _con_ci(app_env['db_path'], 'h1', 'CI-1')
+    _login(client, 'admin')
+
+    respuesta = client.post('/records', data={'record_hash': 'h1', 'ci_h1': 'CI-1'})
+
+    assert 'No se detectaron cambios en CI' in respuesta.get_data(as_text=True)

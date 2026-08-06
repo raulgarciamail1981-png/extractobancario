@@ -351,6 +351,26 @@ def marcar_aviso_visto():
     return redirect(destino)
 
 
+def solo_cambios(changes: list[tuple[str, str]], old_ci_map: dict) -> list[tuple[str, str]]:
+    """Deja solo los CI que de verdad cambian.
+
+    La grilla manda el CI de TODAS las filas visibles, no solo el de las que se
+    tocaron. Sin este filtro, un clic en "Guardar CI" con cientos de filas en
+    pantalla reescribía todas: cientos de UPDATE al pedo y, peor, cientos de
+    entradas en auditoría donde "antes" y "después" son iguales, que tapaban
+    los cambios reales. Además mandaba a la pantalla de confirmación
+    movimientos de otras empresas que nadie había tocado.
+    """
+    filtrados = []
+    for record_hash, ci_value in changes:
+        anterior = old_ci_map.get(record_hash, '')
+        if anterior is None or (isinstance(anterior, float) and pd.isna(anterior)):
+            anterior = ''
+        if ci_value != str(anterior).strip():
+            filtrados.append((record_hash, ci_value))
+    return filtrados
+
+
 def guardar_ci(changes: list[tuple[str, str]], old_ci_map: dict) -> None:
     for record_hash, ci_value in changes:
         db.update_ci(record_hash, ci_value, db_path=DB_PATH)
@@ -1112,8 +1132,12 @@ def records():
                 ci_value = request.form.get(f'ci_{record_hash}', '').strip()
                 if ci_value:
                     changes.append((record_hash, ci_value))
+            old_ci_map = df_full.set_index('RecordHash')['CI'].to_dict()
+            # El filtro va acá y no dentro de guardar_ci: lo que no cambió
+            # tampoco tiene que pasar por la pantalla de confirmación. Si no
+            # queda nada, abajo ya avisa "No se detectaron cambios en CI".
+            changes = solo_cambios(changes, old_ci_map)
             if changes:
-                old_ci_map = df_full.set_index('RecordHash')['CI'].to_dict()
                 empresa_por_hash = df_full.set_index('RecordHash')['Empresa'].to_dict()
                 user = current_user()
                 # Ya viene de la pantalla de confirmación: se guarda todo.

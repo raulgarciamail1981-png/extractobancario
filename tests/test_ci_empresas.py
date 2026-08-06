@@ -231,3 +231,36 @@ def test_el_header_muestra_los_dos_roles(client, app_env):
     body = client.get('/records').get_data(as_text=True)
 
     assert 'finanzas' in body and 'cajera' in body
+
+
+def test_una_fila_ajena_sin_cambios_no_dispara_la_confirmacion(client, app_env):
+    # La grilla manda el CI de TODAS las filas visibles. Si XINOXIA ya tenia su
+    # CI cargado de antes, al guardar un CI propio le saltaba la pantalla de
+    # confirmacion por un movimiento que nunca toco.
+    db.update_ci('h_xinoxia', 'CI-VIEJO', db_path=app_env['db_path'])
+    login(client, 'cajera_parcial')
+
+    resp = client.post('/records', data={
+        'record_hash': ['h_alco', 'h_xinoxia'],
+        'ci_h_alco': 'CI-100', 'ci_h_xinoxia': 'CI-VIEJO',
+    })
+
+    body = resp.get_data(as_text=True)
+    assert 'registros de otras empresas' not in body
+    assert 'CI actualizados correctamente' in body
+    guardados = ci_guardados(app_env['db_path'])
+    assert guardados['h_alco'] == 'CI-100'
+    assert guardados['h_xinoxia'] == 'CI-VIEJO'
+
+
+def test_una_fila_ajena_que_si_cambia_sigue_pidiendo_confirmacion(client, app_env):
+    db.update_ci('h_xinoxia', 'CI-VIEJO', db_path=app_env['db_path'])
+    login(client, 'cajera_parcial')
+
+    resp = client.post('/records', data={
+        'record_hash': ['h_alco', 'h_xinoxia'],
+        'ci_h_alco': 'CI-100', 'ci_h_xinoxia': 'CI-CAMBIADO',
+    })
+
+    assert 'registros de otras empresas' in resp.get_data(as_text=True)
+    assert ci_guardados(app_env['db_path'])['h_xinoxia'] == 'CI-VIEJO'
