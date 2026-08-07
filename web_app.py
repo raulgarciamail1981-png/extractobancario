@@ -918,10 +918,12 @@ def apply_general_search(df: pd.DataFrame, term: str) -> pd.DataFrame:
         is_amount = False
     if not is_amount:
         return df[description_mask | registro_mask]
-    search_term = term.lstrip('-').strip()
     # Comparamos contra el monto sin separador de miles (solo coma decimal)
-    # para que "1500,50" encuentre "1.500,50" sin que el punto de miles
-    # rompa la búsqueda por substring.
+    # para que "1500,50" encuentre "1.500,50" sin que el punto de miles rompa
+    # la búsqueda por substring. El término se normaliza igual: la grilla
+    # muestra "751.200,00" y lo natural es copiar de ahí, pero antes ese punto
+    # de miles se dejaba tal cual y no encontraba nada.
+    search_term = term.lstrip('-').strip().replace('.', '')
     plain_abs = df['Monto_raw'].abs().apply(lambda v: '' if pd.isna(v) else f'{v:.2f}'.replace('.', ','))
     amount_mask = plain_abs.str.contains(search_term, regex=False, na=False)
     # Un término numérico puede ser tanto un monto como un código/referencia
@@ -975,7 +977,41 @@ def apply_record_filters(df: pd.DataFrame, empresa: str, banco: str, fecha: str,
 CI_ALERT_DAYS = 10
 
 
-def prepare_display_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+def detalles_ya_compensados(df: pd.DataFrame) -> pd.Series:
+    """Marca los movimientos que se compensaron contra un consolidado.
+
+    Interbanking agrupa los detalles de un día con el movimiento que el banco
+    emite al día siguiente por la suma de todos ellos. Los tres quedan con el
+    mismo RegistroUnificado, así que mostrarlos juntos cuenta el importe dos
+    veces: en el Resumen tiene que quedar solo el total compensado.
+
+    Cuál es el consolidado no está guardado —la pantalla de Interbanking le
+    pone la misma etiqueta a todas las filas del grupo, y la referencia tampoco
+    alcanza porque puede repetirse dentro del grupo—, pero sí se deduce: al
+    aplicar, esa pantalla exige que la suma de los detalles sea igual al
+    importe a compensar, así que el consolidado es siempre el de mayor importe
+    absoluto del grupo. Si son dos por el mismo importe, da igual cuál quede.
+    """
+    ocultar = pd.Series(False, index=df.index)
+    if df.empty or 'RegistroUnificado' not in df.columns:
+        return ocultar
+    etiqueta = df['RegistroUnificado'].astype(str).str.strip()
+    agrupados = df[etiqueta != '']
+    if agrupados.empty:
+        return ocultar
+    monto_abs = pd.to_numeric(df.get('Monto_raw', df['Monto']), errors='coerce').abs().fillna(0)
+    # Se agrupa también por cuenta: el número de referencia es del banco y
+    # podría repetirse en otra cuenta sin tener nada que ver.
+    claves = [etiqueta.loc[agrupados.index], agrupados['Cuenta'].astype(str)]
+    for _, grupo in agrupados.groupby(claves, sort=False):
+        if len(grupo) < 2:
+            continue
+        consolidado = monto_abs.loc[grupo.index].idxmax()
+        ocultar.loc[[i for i in grupo.index if i != consolidado]] = True
+    return ocultar
+
+
+def prepare_display_dataframe(df: pd.DataFrame, ocultar_compensados: bool = True) -> pd.DataFrame:
     df = df.copy()
     if 'Moneda' not in df.columns:
         df['Moneda'] = ''
@@ -1007,7 +1043,16 @@ def prepare_display_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # exportación); 'Fecha_display' es solo para mostrar dd/mm/aaaa en pantalla.
     df['Fecha_display'] = fecha_dt.dt.strftime('%d/%m/%Y')
     df['Fecha_display'] = df['Fecha_display'].where(fecha_dt.notna(), df['Fecha'])
-    return df
+    # Va al final: necesita Monto_raw ya calculado. Los detalles no se borran,
+    # solo dejan de mostrarse; se ven con el filtro "Ver detalles compensados",
+    # que hace falta para poder revisar una unificación equivocada.
+    if ocultar_compensados:
+        df = df[~detalles_ya_compensados(df)]
+    # Lo más nuevo arriba: es como se lee el resumen y como llega el extracto
+    # del banco. 'Fecha' está en formato ISO, así que ordena bien como texto.
+    # El orden es estable a propósito: dentro de una misma fecha, los
+    # movimientos quedan en el orden en que los trajo el extracto.
+    return df.sort_values('Fecha', ascending=False, kind='stable')
 
 
 def get_filter_options(df_full: pd.DataFrame, filters: dict) -> tuple[list[str], list[str]]:
@@ -1187,8 +1232,10 @@ def records():
             ci_alert_days=CI_ALERT_DAYS,
             filters_query='',
         )
-    df_full = prepare_display_dataframe(df_full)
+    ver_compensados = (request.args.get('ver_compensados') or request.form.get('ver_compensados', '')) == '1'
+    df_full = prepare_display_dataframe(df_full, ocultar_compensados=not ver_compensados)
     filters = {
+        'ver_compensados': '1' if ver_compensados else '',
         'empresa': request.args.get('empresa') or request.form.get('empresa', ''),
         'banco': request.args.get('banco') or request.form.get('banco', ''),
         'fecha': request.args.get('fecha') or request.form.get('fecha', ''),
@@ -1253,7 +1300,8 @@ def records():
                         filters_query=urlencode({k: v for k, v in filters.items() if v}),
                     )
                 message = 'CI actualizados correctamente.'
-                df_full = prepare_display_dataframe(db.load_movements(db_path=DB_PATH))
+                df_full = prepare_display_dataframe(db.load_movements(db_path=DB_PATH),
+                                                     ocultar_compensados=not ver_compensados)
                 empresa_options, banco_options = get_filter_options(df_full, filters)
                 df_filtered = apply_record_filters(
                     df_full,
@@ -1305,6 +1353,7 @@ def get_filters_from_args() -> dict:
         'search': request.args.get('search', ''),
         'moneda': request.args.get('moneda', ''),
         'vencido': request.args.get('vencido', ''),
+        'ver_compensados': request.args.get('ver_compensados', ''),
     }
 
 
@@ -1346,7 +1395,9 @@ def load_filtered_export_dataframe(filters: dict) -> pd.DataFrame:
     df = db.load_movements(db_path=DB_PATH)
     if df.empty:
         return df
-    df = prepare_display_dataframe(df)
+    # La exportación tiene que mostrar lo mismo que la pantalla: sin los
+    # detalles ya compensados, salvo que se hayan pedido explícitamente.
+    df = prepare_display_dataframe(df, ocultar_compensados=filters.get('ver_compensados') != '1')
     return apply_record_filters(
         df, filters['empresa'], filters['banco'], filters['fecha'], filters['fecha_desde'],
         filters['fecha_hasta'], filters['monto_filter'], filters['ci_filter'], filters['search'],

@@ -96,6 +96,13 @@
         <label for="filterSearch">Buscar (monto o descripción)</label>
         <input id="filterSearch" type="text" name="search" value="{{ filters.search or '' }}" placeholder="ej. 1500 o transferencia">
       </div>
+      <div class="field">
+        <label for="filterCompensados">Interbanking</label>
+        <select id="filterCompensados" name="ver_compensados">
+          <option value="" {% if filters.ver_compensados != '1' %}selected{% endif %}>Solo el total compensado</option>
+          <option value="1" {% if filters.ver_compensados == '1' %}selected{% endif %}>Ver también los detalles</option>
+        </select>
+      </div>
     </div>
     <div class="filters__actions">
       <button type="button" id="last30Button" class="btn btn--ghost btn--sm">Ver últimos 30 días</button>

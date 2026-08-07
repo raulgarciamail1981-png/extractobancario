@@ -66,6 +66,14 @@ def _body(client, ruta='/records'):
     return client.get(ruta).get_data(as_text=True)
 
 
+# Fecha vieja y fija para el "visto hasta acá". Dejar que la ponga el reloj
+# hacía que el test fallara de a ratos: en la corrida completa, la primera
+# visita y el CI que se carga después caen en el mismo milisegundo del reloj de
+# Windows, y ahí "posterior a" es falso. Lo que se quiere probar es la lógica
+# del aviso, no la resolución del reloj.
+VISTO_VIEJO = '2026-01-01T00:00:00+00:00'
+
+
 # --------------------------- extractos (cajeras) ---------------------------
 
 def test_la_primera_visita_no_avisa_de_lo_que_ya_estaba(client, app_env):
@@ -120,6 +128,7 @@ def test_el_comercial_ve_los_ci_asignados_en_sus_empresas(client, app_env):
     _movimiento(app_env['db_path'], 'hash1', 'ALCO ROSARIO SA')
     _login(client, 'comercial')
     _body(client)
+    db.marcar_notificacion_vista('comercial', 'ci', VISTO_VIEJO, db_path=app_env['db_path'])
 
     _movimiento(app_env['db_path'], 'hash1', 'ALCO ROSARIO SA', ci='CI-100')
     db.log_action('cajera', 'update_ci', detail={'antes': '', 'despues': 'CI-100'},
@@ -157,6 +166,7 @@ def test_el_aviso_de_ci_se_apaga_al_marcarlo_visto(client, app_env):
     _movimiento(app_env['db_path'], 'hash4', 'ALCO ROSARIO SA')
     _login(client, 'comercial')
     _body(client)
+    db.marcar_notificacion_vista('comercial', 'ci', VISTO_VIEJO, db_path=app_env['db_path'])
 
     _movimiento(app_env['db_path'], 'hash4', 'ALCO ROSARIO SA', ci='CI-300')
     db.log_action('cajera', 'update_ci', record_hash='hash4', db_path=app_env['db_path'])

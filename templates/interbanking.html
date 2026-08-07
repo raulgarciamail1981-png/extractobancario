@@ -1,186 +1,156 @@
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Conciliador Neostar - Unificar Interbanking</title>
-    <style>
-      body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #eff2ff; color: #0f172a; }
-      .page { max-width: 1100px; margin: 28px auto; padding: 0 24px; }
-      .card { background: #ffffff; border-radius: 24px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08); padding: 32px; }
-      .logo { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
-      .logo-img { height: 40px; width: auto; }
-      .logo-title { font-size: 1.6rem; font-weight: 700; margin: 0; }
-      .subtitle { color: #64748b; margin-top: 6px; }
-      .menu-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
-      .menu-link { display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 14px; text-decoration: none; background: #4338ca; color: #fff; font-weight: 700; }
-      .menu-link:hover { background: #3730a3; }
-      .alert { border-radius: 16px; padding: 16px; margin-bottom: 20px; }
-      .alert.success { background: #ecfdf5; color: #166534; }
-      .alert.error { background: #fee2e2; color: #991b1b; }
-      .alert.info { background: #eef2ff; color: #3730a3; }
-      .account-select { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 20px; padding: 18px 20px; margin-bottom: 20px; }
-      .account-select label { display: flex; flex-direction: column; gap: 8px; font-weight: 600; color: #334155; max-width: 420px; }
-      .account-select select { border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px 12px; background: #fff; }
-      .summary-box { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; border: 1px solid #c7d2fe; background: #eef2ff; border-radius: 18px; padding: 18px 20px; margin-bottom: 20px; color: #3730a3; }
-      .summary-box.ready { border-color: #86efac; background: #ecfdf5; color: #166534; }
-      .summary-box div strong { display: block; font-size: 1.2rem; margin-top: 4px; }
-      table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-      th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-      th { background: #f8fafc; color: #334155; font-weight: 700; }
-      tbody tr:nth-child(even) { background: #f8fafc; }
-      td.amount-cell { font-weight: 600; white-space: nowrap; }
-      .button { border: none; border-radius: 14px; padding: 12px 18px; background: #4338ca; color: #fff; font-weight: 700; cursor: pointer; margin-top: 20px; }
-      .button:hover { background: #3730a3; }
-      .button:disabled { background: #c7d2fe; cursor: not-allowed; }
-      .grid-container { overflow-x: auto; }
-      .empty-note { color: #64748b; padding: 16px 0; }
-    </style>
-  </head>
-  <body>
-    <div class="page">
-      <div class="card">
-        <div class="logo">
-          <img class="logo-img" src="{{ url_for('static', filename='neostar-logo.jpg') }}" alt="Neostar">
-          <div>
-            <p class="logo-title">Unificar registros Interbanking</p>
-            <p class="subtitle">Conciliá los pagos a proveedores "TEF DATANET BTOB" de Macro con su registro consolidado.</p>
-          </div>
+{% extends 'base.html' %}
+{% block title %}Conciliador Neostar · Interbanking{% endblock %}
+
+{# Pantalla traída del repositorio 'conciliador'. Se pasó al diseño del resto
+   de la app, pero SIN tocar el comportamiento: los id, los name, los value,
+   las clases que usa el JavaScript y hasta el orden de los atributos quedaron
+   igual. #}
+
+{% block content %}
+  <section class="hero">
+    <span class="hero__eyebrow">Conciliación</span>
+    <h1 class="hero__title">Unificar registros <span>Interbanking</span></h1>
+    <p class="hero__subtitle">
+      Conciliá los pagos a proveedores «TEF DATANET BTOB» de Macro con su registro consolidado.
+    </p>
+  </section>
+
+  {% if message %}
+    <div class="alert alert--ok">{{ message }}</div>
+  {% endif %}
+  {% if error %}
+    <div class="alert alert--error">{{ error }}</div>
+  {% endif %}
+
+  {% if not accounts %}
+    <div class="alert alert--info">No hay movimientos Interbanking pendientes de unificar.</div>
+  {% else %}
+    <div class="filters">
+      <div class="filters__title">Cuenta a conciliar</div>
+      <div class="filters__grid">
+        <div class="field">
+          <label for="accountSelect">Empresa + Cuenta</label>
+          <select id="accountSelect">
+            {% for acc in accounts %}
+              <option value="{{ acc.empresa }}||{{ acc.cuenta }}" {% if acc.empresa == empresa and acc.cuenta == cuenta %}selected{% endif %}>{{ acc.empresa }} — {{ acc.cuenta }}</option>
+            {% endfor %}
+          </select>
         </div>
-
-        <div class="menu-row">
-          <a class="menu-link" href="/upload">Carga</a>
-          <a class="menu-link" href="/records">Resumen</a>
-          <a class="menu-link" href="/logout">Salir</a>
-        </div>
-
-        {% if message %}
-          <div class="alert success">{{ message }}</div>
-        {% endif %}
-        {% if error %}
-          <div class="alert error">{{ error }}</div>
-        {% endif %}
-
-        {% if not accounts %}
-          <div class="alert info">No hay movimientos Interbanking pendientes de unificar.</div>
-        {% else %}
-          <div class="account-select">
-            <label>
-              Empresa + Cuenta
-              <select id="accountSelect">
-                {% for acc in accounts %}
-                  <option value="{{ acc.empresa }}||{{ acc.cuenta }}" {% if acc.empresa == empresa and acc.cuenta == cuenta %}selected{% endif %}>{{ acc.empresa }} — {{ acc.cuenta }}</option>
-                {% endfor %}
-              </select>
-            </label>
-          </div>
-
-          {% if not candidates %}
-            <p class="empty-note">No quedan movimientos "TEF DATANET BTOB" pendientes para esta cuenta.</p>
-          {% else %}
-            <form method="post" action="/interbanking/apply" id="interbankingForm">
-              {# La app exige CSRF en todos los POST; sin este token el envío
-                 se rechaza con 400. Es lo único que se le agregó a esta
-                 pantalla: el resto quedó tal cual se probó. #}
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="empresa" value="{{ empresa }}">
-              <input type="hidden" name="cuenta" value="{{ cuenta }}">
-
-              <div class="summary-box" id="summaryBox">
-                <div>A Compensar<strong id="summaryTarget">—</strong></div>
-                <div>Seleccionado<strong id="summarySelected">$0,00</strong></div>
-                <div>Falta compensar<strong id="summaryRemaining">—</strong></div>
-              </div>
-
-              <div class="grid-container">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>A Compensar</th>
-                      <th>Seleccionar</th>
-                      <th>Importe</th>
-                      <th>Fecha</th>
-                      <th>Descripción</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for c in candidates %}
-                      <tr data-hash="{{ c.hash }}" data-monto="{{ c.monto_abs }}">
-                        <td><input type="radio" name="a_compensar_hash" value="{{ c.hash }}" class="a-compensar-radio" {% if c.hash == suggested_a_compensar_hash %}checked{% endif %}></td>
-                        <td><input type="checkbox" name="selected_hashes" value="{{ c.hash }}" class="select-checkbox" {% if c.hash in suggested_checked_hashes %}checked{% endif %}></td>
-                        <td class="amount-cell">${{ '%.2f'|format(c.monto_abs) }}</td>
-                        <td>{{ c.fecha }}</td>
-                        <td>{{ c.descripcion }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-
-              <button type="submit" class="button" id="applyButton" disabled>Aplicar unificación</button>
-            </form>
-          {% endif %}
-        {% endif %}
       </div>
     </div>
-    <script>
-      const accountSelect = document.getElementById('accountSelect');
-      if (accountSelect) {
-        accountSelect.addEventListener('change', function () {
-          const [emp, cta] = this.value.split('||');
-          location.href = '/interbanking?empresa=' + encodeURIComponent(emp) + '&cuenta=' + encodeURIComponent(cta);
-        });
-      }
 
-      const form = document.getElementById('interbankingForm');
-      if (form) {
-        const radios = Array.from(form.querySelectorAll('.a-compensar-radio'));
-        const checkboxes = Array.from(form.querySelectorAll('.select-checkbox'));
-        const applyButton = document.getElementById('applyButton');
-        const summaryBox = document.getElementById('summaryBox');
-        const summaryTarget = document.getElementById('summaryTarget');
-        const summarySelected = document.getElementById('summarySelected');
-        const summaryRemaining = document.getElementById('summaryRemaining');
-        const TOLERANCE = 0.01;
+    <div class="card">
+      {% if not candidates %}
+        <div class="empty">
+          <div class="empty__icon">✅</div>
+          <p>No quedan movimientos "TEF DATANET BTOB" pendientes para esta cuenta.</p>
+        </div>
+      {% else %}
+        <form method="post" action="/interbanking/apply" id="interbankingForm">
+          {# La app exige CSRF en todos los POST; sin este token el envío se
+             rechaza con 400. Es lo único que se le agregó a esta pantalla. #}
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="empresa" value="{{ empresa }}">
+          <input type="hidden" name="cuenta" value="{{ cuenta }}">
 
-        function formatMoney(value) {
-          return '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          <div class="ib-resumen" id="summaryBox">
+            <div>A Compensar<strong id="summaryTarget">—</strong></div>
+            <div>Seleccionado<strong id="summarySelected">$0,00</strong></div>
+            <div>Falta compensar<strong id="summaryRemaining">—</strong></div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>A Compensar</th>
+                  <th>Seleccionar</th>
+                  <th>Importe</th>
+                  <th>Fecha</th>
+                  <th>Descripción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in candidates %}
+                  <tr data-hash="{{ c.hash }}" data-monto="{{ c.monto_abs }}">
+                    <td data-label="A Compensar"><input type="radio" name="a_compensar_hash" value="{{ c.hash }}" class="a-compensar-radio" {% if c.hash == suggested_a_compensar_hash %}checked{% endif %}></td>
+                    <td data-label="Seleccionar"><input type="checkbox" name="selected_hashes" value="{{ c.hash }}" class="select-checkbox" {% if c.hash in suggested_checked_hashes %}checked{% endif %}></td>
+                    <td data-label="Importe" class="cell--num">${{ '%.2f'|format(c.monto_abs) }}</td>
+                    <td data-label="Fecha">{{ c.fecha }}</td>
+                    <td data-label="Descripción" class="cell--wrap">{{ c.descripcion }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="toolbar__actions" style="margin-top: 1.2rem;">
+            <button type="submit" class="btn btn--primary" id="applyButton" disabled>Aplicar unificación</button>
+          </div>
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const accountSelect = document.getElementById('accountSelect');
+  if (accountSelect) {
+    accountSelect.addEventListener('change', function () {
+      const [emp, cta] = this.value.split('||');
+      location.href = '/interbanking?empresa=' + encodeURIComponent(emp) + '&cuenta=' + encodeURIComponent(cta);
+    });
+  }
+
+  const form = document.getElementById('interbankingForm');
+  if (form) {
+    const radios = Array.from(form.querySelectorAll('.a-compensar-radio'));
+    const checkboxes = Array.from(form.querySelectorAll('.select-checkbox'));
+    const applyButton = document.getElementById('applyButton');
+    const summaryBox = document.getElementById('summaryBox');
+    const summaryTarget = document.getElementById('summaryTarget');
+    const summarySelected = document.getElementById('summarySelected');
+    const summaryRemaining = document.getElementById('summaryRemaining');
+    const TOLERANCE = 0.01;
+
+    function formatMoney(value) {
+      return '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function update() {
+      const selectedRadio = radios.find(function (r) { return r.checked; });
+      const targetRow = selectedRadio ? selectedRadio.closest('tr') : null;
+      const targetHash = targetRow ? targetRow.dataset.hash : null;
+      const targetMonto = targetRow ? parseFloat(targetRow.dataset.monto) : 0;
+
+      let selectedSum = 0;
+      checkboxes.forEach(function (cb) {
+        const row = cb.closest('tr');
+        if (targetHash && row.dataset.hash === targetHash) {
+          cb.checked = false;
+          cb.disabled = true;
+        } else {
+          cb.disabled = false;
         }
-
-        function update() {
-          const selectedRadio = radios.find(function (r) { return r.checked; });
-          const targetRow = selectedRadio ? selectedRadio.closest('tr') : null;
-          const targetHash = targetRow ? targetRow.dataset.hash : null;
-          const targetMonto = targetRow ? parseFloat(targetRow.dataset.monto) : 0;
-
-          let selectedSum = 0;
-          checkboxes.forEach(function (cb) {
-            const row = cb.closest('tr');
-            if (targetHash && row.dataset.hash === targetHash) {
-              cb.checked = false;
-              cb.disabled = true;
-            } else {
-              cb.disabled = false;
-            }
-            if (cb.checked && !cb.disabled) {
-              selectedSum += parseFloat(row.dataset.monto);
-            }
-          });
-
-          const remaining = targetMonto - selectedSum;
-          summaryTarget.textContent = selectedRadio ? formatMoney(targetMonto) : '—';
-          summarySelected.textContent = formatMoney(selectedSum);
-          summaryRemaining.textContent = selectedRadio ? formatMoney(remaining) : '—';
-
-          const isReady = !!selectedRadio && selectedSum > 0 && Math.abs(remaining) < TOLERANCE;
-          applyButton.disabled = !isReady;
-          summaryBox.classList.toggle('ready', isReady);
+        if (cb.checked && !cb.disabled) {
+          selectedSum += parseFloat(row.dataset.monto);
         }
+      });
 
-        radios.forEach(function (r) { r.addEventListener('change', update); });
-        checkboxes.forEach(function (cb) { cb.addEventListener('change', update); });
-        update();
-      }
-    </script>
-  </body>
-</html>
+      const remaining = targetMonto - selectedSum;
+      summaryTarget.textContent = selectedRadio ? formatMoney(targetMonto) : '—';
+      summarySelected.textContent = formatMoney(selectedSum);
+      summaryRemaining.textContent = selectedRadio ? formatMoney(remaining) : '—';
+
+      const isReady = !!selectedRadio && selectedSum > 0 && Math.abs(remaining) < TOLERANCE;
+      applyButton.disabled = !isReady;
+      summaryBox.classList.toggle('ready', isReady);
+    }
+
+    radios.forEach(function (r) { r.addEventListener('change', update); });
+    checkboxes.forEach(function (cb) { cb.addEventListener('change', update); });
+    update();
+  }
+</script>
+{% endblock %}

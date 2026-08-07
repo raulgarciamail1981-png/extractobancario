@@ -1324,3 +1324,61 @@ def test_el_acceso_a_interbanking_aparece_en_el_menu_segun_el_rol(client, app_en
     body = client.get('/records').get_data(as_text=True)
 
     assert ('href="/interbanking"' in body) is deberia_ver
+
+
+@pytest.mark.parametrize('termino', ['751.200,00', '751200,00', '751.200', '751200'])
+def test_la_busqueda_encuentra_el_monto_tal_como_se_ve_en_la_grilla(client, app_env, termino):
+    # La grilla muestra "751.200,00" y lo natural es copiar de ahi para buscar.
+    # El separador de miles quedaba en el termino pero no en el dato, asi que
+    # buscar exactamente lo que se ve no encontraba nada.
+    _seed_movements(app_env['db_path'], [
+        {'Descripcion': 'Transferencia ctas mobile banking', 'Monto': 751200.00},
+        {'Descripcion': 'Otro movimiento', 'Monto': 999.00},
+    ])
+    login(client, 'admin', 'adminpass')
+
+    body = client.get(f'/records?search={termino}').get_data(as_text=True)
+
+    assert 'Transferencia ctas mobile banking' in body
+    assert 'Otro movimiento' not in body
+
+
+def test_la_busqueda_de_un_monto_con_signo_menos_sigue_andando(client, app_env):
+    _seed_movements(app_env['db_path'], [
+        {'Descripcion': 'Pago proveedor', 'Monto': -1500.50},
+        {'Descripcion': 'Cobro cliente', 'Monto': 999.00},
+    ])
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/records?search=-1.500,50').get_data(as_text=True)
+
+    assert 'Pago proveedor' in body
+    assert 'Cobro cliente' not in body
+
+
+def test_el_resumen_ordena_las_fechas_de_mayor_a_menor(client, app_env):
+    _seed_movements(app_env['db_path'], [
+        {'Descripcion': 'La del medio', 'Fecha': '15/07/2026'},
+        {'Descripcion': 'La mas vieja', 'Fecha': '01/07/2026'},
+        {'Descripcion': 'La mas nueva', 'Fecha': '31/07/2026'},
+    ])
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/records').get_data(as_text=True)
+
+    assert body.index('La mas nueva') < body.index('La del medio') < body.index('La mas vieja')
+
+
+def test_dentro_de_la_misma_fecha_se_respeta_el_orden_del_extracto(client, app_env):
+    # Orden estable: si el banco lista tres movimientos del mismo dia en cierto
+    # orden, ordenar por fecha no se lo tiene que dar vuelta.
+    _seed_movements(app_env['db_path'], [
+        {'Descripcion': 'Primero del dia', 'Fecha': '15/07/2026'},
+        {'Descripcion': 'Segundo del dia', 'Fecha': '15/07/2026'},
+        {'Descripcion': 'Tercero del dia', 'Fecha': '15/07/2026'},
+    ])
+    login(client, 'admin', 'adminpass')
+
+    body = client.get('/records').get_data(as_text=True)
+
+    assert body.index('Primero del dia') < body.index('Segundo del dia') < body.index('Tercero del dia')

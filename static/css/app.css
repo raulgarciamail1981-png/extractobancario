@@ -365,6 +365,21 @@ table.data { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 /* El texto de /unify llega con saltos de línea reales. */
 .alert--block { white-space: pre-line; }
 
+.alert--info { background: var(--bg-alt); color: var(--text-soft); }
+
+/* Interbanking: recuadro con lo seleccionado y lo que falta compensar. La
+   clase "ready" la enciende el JS de esa pantalla cuando la suma cierra, así
+   que el nombre no se puede cambiar. */
+.ib-resumen {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.9rem; padding: 1rem 1.1rem; margin-bottom: 1.2rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-alt); color: var(--text-soft);
+}
+.ib-resumen strong { display: block; font-size: 1.25rem; margin-top: 0.2rem; color: var(--text); }
+.ib-resumen.ready { border-color: var(--green); background: var(--green-soft); color: var(--green-dark); }
+.ib-resumen.ready strong { color: var(--green-dark); }
+
 /* Avisos persistentes (extractos nuevos / CI asignado). A diferencia de
    .alert--notice, que lo prende el JS mientras la pantalla está abierta, este
    se ve apenas entra la persona y queda hasta que aprieta "Entendido". */
